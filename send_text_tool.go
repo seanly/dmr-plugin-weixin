@@ -107,7 +107,7 @@ func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string) (map[s
 	case peerArg != "":
 		peerID = peerArg
 	default:
-		return nil, fmt.Errorf("weixin.send_text requires tape_name or peer_id when not in a Weixin-triggered job")
+		return nil, fmt.Errorf("weixinSendText requires tape_name or peer_id when not in a Weixin-triggered job")
 	}
 	tok := p.tokens.get(peerID)
 	if tok == "" {

@@ -208,12 +208,12 @@ func (p *WeixinPlugin) RequestBatchApproval(req *proto.BatchApprovalRequest, res
 func (p *WeixinPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.ProvideToolsResponse) error {
 	resp.Tools = []proto.ToolDef{
 		{
-			Name:           "weixin.send_text",
+			Name:           "weixinSendText",
 			Description:    "Send plain text to current Weixin peer, or use tape_name weixin:p2p:<id> / peer_id for cron. Requires prior context_token (user messaged bot).",
 			ParametersJSON: sendTextToolParamsJSON(),
 		},
 	}
-	log.Printf("weixin: ProvideTools -> weixin.send_text")
+	log.Printf("weixin: ProvideTools -> weixinSendText")
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (p *WeixinPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	p.runMu.Unlock()
 
 	switch req.Name {
-	case "weixin.send_text":
+	case "weixinSendText":
 		result, err := p.execSendText(ctx, req.ArgsJSON)
 		if err != nil {
 			resp.Error = err.Error()

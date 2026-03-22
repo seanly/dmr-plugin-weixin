@@ -10,11 +10,11 @@ This is exactly the split you described:
 
 2. **Go implementation** — `gateway_client.go`, `types.go`, `monitor.go`, `reply.go`, … as a **standalone binary** suitable for `go-plugin`.
 
-3. **DMR AI agent integration** — Same external-plugin pattern as [dmr-plugin-feishu](https://github.com/seanly/dmr-plugin-feishu): `SetHostClient` + `Plugin.RunAgent`, tape names `weixin:p2p:<peer>`, dedup / `allow_from`, **`ProvideTools` with `weixin.send_text` only**, and `ProvideApprover` for OPA `require_approval`. OpenClaw-specific pieces (plugin-sdk routing, slash commands, pairing files) are **not** copied.
+3. **DMR AI agent integration** — Same external-plugin pattern as [dmr-plugin-feishu](https://github.com/seanly/dmr-plugin-feishu): `SetHostClient` + `Plugin.RunAgent`, tape names `weixin:p2p:<peer>`, dedup / `allow_from`, **`ProvideTools` with `weixinSendText` only**, and `ProvideApprover` for OPA `require_approval`. OpenClaw-specific pieces (plugin-sdk routing, slash commands, pairing files) are **not** copied.
 
 #### Media / file send (temporarily removed)
 
-**`weixin.send_file`** and the **`getuploadurl` → CDN → file/image/video `sendmessage`** path are **not** in this revision (re-add with OpenClaw-style PKCS7 + AES-128-ECB when needed). `cdn_base_url` in config is **optional** until then; `dmr-weixin-login` still writes it for convenience.
+**`weixinSendFile`** and the **`getuploadurl` → CDN → file/image/video `sendmessage`** path are **not** in this revision (re-add with OpenClaw-style PKCS7 + AES-128-ECB when needed). `cdn_base_url` in config is **optional** until then; `dmr-weixin-login` still writes it for convenience.
 
 **You only need DMR to run it** — settings live under **`plugins[].config`**. **`gateway_base_url`** and **`token`** are required; **`cdn_base_url`** optional for text-only.
 
@@ -108,7 +108,7 @@ Inbound private chat: **`weixin:p2p:<from_user_id>`** (e.g. `xxx@im.wechat`). On
 
 ## Tools
 
-- **`weixin.send_text`** — Plain text to current peer when run from inbound context; for cron use `tape_name` or `peer_id`. Needs a **cached `context_token`**. Set **`DMR_WEIXIN_DEBUG_SEND=1`** on `dmr serve` to log truncated `sendmessage` JSON when debugging delivery.
+- **`weixinSendText`** — Plain text to current peer when run from inbound context; for cron use `tape_name` or `peer_id`. Needs a **cached `context_token`**. Set **`DMR_WEIXIN_DEBUG_SEND=1`** on `dmr serve` to log truncated `sendmessage` JSON when debugging delivery.
 
 ## Approvals
 
@@ -116,7 +116,7 @@ Only **`weixin:p2p:*`** tapes. Plain-text prompts. Replies: **y / s / a / n** (s
 
 ## Cron
 
-Use tape **`weixin:p2p:<peer_id>`** with `dmr-plugin-cron`; deliver with **`weixin.send_text`** and `tape_name` / `peer_id` — same pattern as Feishu + `feishu.send_text`.
+Use tape **`weixin:p2p:<peer_id>`** with `dmr-plugin-cron`; deliver with **`weixinSendText`** and `tape_name` / `peer_id` — same pattern as Feishu + `feishuSendText`.
 
 ## Development
 

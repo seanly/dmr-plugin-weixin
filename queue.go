@@ -115,7 +115,7 @@ func weixinFallbackWhenNoText(tape string, resp *proto.RunAgentResponse) string 
 	if len(resp.ToolCalls) == 0 {
 		if resp.Steps > 0 {
 			return fmt.Sprintf(
-				"助手未返回可见文字。本轮约 %d 步；请查 tape「%s」。长内容可先写入文件，再用 weixin.send_text 发摘要或链接。",
+				"助手未返回可见文字。本轮约 %d 步；请查 tape「%s」。长内容可先写入文件，再用 weixinSendText 发摘要或链接。",
 				resp.Steps, strings.TrimSpace(tape),
 			)
 		}
