@@ -1,0 +1,26 @@
+# Binaries (make build / make login-build)
+dmr-plugin-weixin
+dmr-weixin-login
+
+# Cross-build artifacts (make cross-build)
+dmr-plugin-weixin-linux-amd64
+dmr-plugin-weixin-linux-arm64
+dmr-plugin-weixin-darwin-amd64
+dmr-plugin-weixin-darwin-arm64
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
