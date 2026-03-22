@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -61,25 +59,27 @@ func (p *WeixinPlugin) newClientID() string {
 	return "dmr-wx-" + hex.EncodeToString(b[:])
 }
 
-func aesKeyHexToBase64(h string) (string, error) {
-	raw, err := hex.DecodeString(strings.TrimSpace(h))
-	if err != nil || len(raw) != 16 {
-		return "", fmt.Errorf("invalid aes key hex")
-	}
-	return base64.StdEncoding.EncodeToString(raw), nil
-}
-
 func (p *WeixinPlugin) sendBotMessage(ctx context.Context, peerID, contextToken string, items []messageItem) error {
 	if strings.TrimSpace(contextToken) == "" {
 		return fmt.Errorf("contextToken is required")
 	}
 	msg := &weixinMessage{
-		ToUserID:     peerID,
-		ClientID:     p.newClientID(),
-		MessageType:  msgTypeBot,
-		MessageState: 2, // FINISH
-		ItemList:     items,
-		ContextToken: contextToken,
+		ToUserID:        peerID,
+		ClientID:        p.newClientID(),
+		MessageType:     msgTypeBot,
+		MessageState:    2, // FINISH
+		ItemList:        items,
+		ContextToken:    contextToken,
+		ContextTokCamel: contextToken,
+	}
+	sid := p.sessionIDForPeer(peerID)
+	if sid == "" {
+		if j := p.getActiveJob(); j != nil && strings.TrimSpace(j.PeerID) == strings.TrimSpace(peerID) {
+			sid = strings.TrimSpace(j.SessionID)
+		}
+	}
+	if sid != "" {
+		msg.SessionID = sessionIDJSON(sid)
 	}
 	return p.sendMessageAPI(ctx, msg)
 }
@@ -141,98 +141,4 @@ func (p *WeixinPlugin) sendApprovalText(ctx context.Context, peerID, contextToke
 		return fmt.Errorf("missing context_token for approval message")
 	}
 	return p.sendPlainTextChunks(ctx, peerID, tok, body)
-}
-
-func (p *WeixinPlugin) sendImageMessage(ctx context.Context, peerID, contextToken, caption string, up *uploadedFileInfo) error {
-	tok := strings.TrimSpace(contextToken)
-	if tok == "" {
-		return fmt.Errorf("context_token required")
-	}
-	aesB64, err := aesKeyHexToBase64(up.AESKeyHex)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(caption) != "" {
-		if err := p.sendBotMessage(ctx, peerID, tok, []messageItem{
-			{Type: itemTypeText, TextItem: &textItem{Text: truncateRunes(markdownToPlainText(caption), maxWeixinChunkRunes)}},
-		}); err != nil {
-			log.Printf("weixin: caption send failed: %v", err)
-		}
-	}
-	return p.sendBotMessage(ctx, peerID, tok, []messageItem{
-		{
-			Type: itemTypeImage,
-			ImageItem: &imageItem{
-				Media: &cdnMedia{
-					EncryptQueryParam: up.DownloadEncryptedQueryParam,
-					AesKey:            aesB64,
-					EncryptType:       1,
-				},
-				MidSize: up.FileSizeCiphertext,
-			},
-		},
-	})
-}
-
-func (p *WeixinPlugin) sendFileAttachmentMessage(ctx context.Context, peerID, contextToken, caption, displayName string, up *uploadedFileInfo) error {
-	tok := strings.TrimSpace(contextToken)
-	if tok == "" {
-		return fmt.Errorf("context_token required")
-	}
-	aesB64, err := aesKeyHexToBase64(up.AESKeyHex)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(caption) != "" {
-		if err := p.sendBotMessage(ctx, peerID, tok, []messageItem{
-			{Type: itemTypeText, TextItem: &textItem{Text: truncateRunes(markdownToPlainText(caption), maxWeixinChunkRunes)}},
-		}); err != nil {
-			log.Printf("weixin: caption send failed: %v", err)
-		}
-	}
-	return p.sendBotMessage(ctx, peerID, tok, []messageItem{
-		{
-			Type: itemTypeFile,
-			FileItem: &fileItem{
-				Media: &cdnMedia{
-					EncryptQueryParam: up.DownloadEncryptedQueryParam,
-					AesKey:            aesB64,
-					EncryptType:       1,
-				},
-				FileName: displayName,
-				Len:      fmt.Sprintf("%d", up.FileSize),
-			},
-		},
-	})
-}
-
-func (p *WeixinPlugin) sendVideoMessage(ctx context.Context, peerID, contextToken, caption string, up *uploadedFileInfo) error {
-	tok := strings.TrimSpace(contextToken)
-	if tok == "" {
-		return fmt.Errorf("context_token required")
-	}
-	aesB64, err := aesKeyHexToBase64(up.AESKeyHex)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(caption) != "" {
-		if err := p.sendBotMessage(ctx, peerID, tok, []messageItem{
-			{Type: itemTypeText, TextItem: &textItem{Text: truncateRunes(markdownToPlainText(caption), maxWeixinChunkRunes)}},
-		}); err != nil {
-			log.Printf("weixin: caption send failed: %v", err)
-		}
-	}
-	return p.sendBotMessage(ctx, peerID, tok, []messageItem{
-		{
-			Type: itemTypeVideo,
-			VideoItem: &videoItem{
-				Media: &cdnMedia{
-					EncryptQueryParam: up.DownloadEncryptedQueryParam,
-					AesKey:            aesB64,
-					EncryptType:       1,
-				},
-				VideoSize: up.FileSizeCiphertext,
-			},
-		},
-	})
 }

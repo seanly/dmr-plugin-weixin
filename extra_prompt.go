@@ -6,9 +6,9 @@ const weixinInboundBuiltinSchedulingHint = `【微信·定时】由 dmr-plugin-c
 
 [Cron/Weixin] Scheduled runs lack Weixin inbound context—assistant text is not auto-posted to IM. To deliver a message here, call weixin.send_text with tape_name matching this chat. For one-shot jobs, use run_once=true on cron.add.`
 
-const weixinInboundBuiltinReportHint = `【微信·报告】报告、分析、总结、评估、扫描结果等多段落交付：**先**用 fs.write 写成 UTF-8 文件（优先 .md），再 **只** 用 **weixin.send_file** 的 **path** 发送。**禁止**用 weixin.send_text 承载报告正文；send_text 仅用于短确认、链接等。
+const weixinInboundBuiltinReportHint = `【微信·报告】长报告、多段落交付：可用 fs.write 落盘（如 .md），再用 **weixin.send_text** 发摘要、要点或文件路径说明（当前版本不提供 weixin.send_file）。
 
-[Weixin reports] For report-style output: write full body to a file (prefer .md), deliver via weixin.send_file path only; do not put report body in weixin.send_text.`
+[Weixin reports] For long output: write to a file if needed, then summarize or reference via weixin.send_text (file attachment tool not available in this build).`
 
 func (p *WeixinPlugin) composeRunPrompt(userContent string) string {
 	user := userContent

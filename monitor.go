@@ -124,8 +124,12 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	if peerID == "" {
 		return
 	}
-	if tok := strings.TrimSpace(full.ContextToken); tok != "" {
+	if tok := full.inboundContextToken(); tok != "" {
 		p.tokens.set(peerID, tok)
+		p.prefetchOutboundSession(ctx, peerID, tok)
+	}
+	if sid := full.inboundSessionID(); sid != "" {
+		p.rememberSessionForPeer(peerID, sid)
 	}
 
 	dkey := dedupKeyForMessage(full)
@@ -150,13 +154,18 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	}
 
 	tape := tapeNameForP2P(peerID)
+	jobSid := strings.TrimSpace(full.inboundSessionID())
+	if jobSid == "" {
+		jobSid = strings.TrimSpace(p.sessionIDForPeer(peerID))
+	}
 	job := &inboundJob{
 		QueueKey:     tape,
 		TapeName:     tape,
 		PeerID:       peerID,
 		Content:      body,
 		TriggerMsgID: dkey,
-		ContextToken: strings.TrimSpace(full.ContextToken),
+		ContextToken: full.inboundContextToken(),
+		SessionID:    jobSid,
 	}
 
 	if p.tryHandleDMRRestart(ctx, job, body) {

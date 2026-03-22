@@ -17,6 +17,8 @@ type inboundJob struct {
 	Content      string
 	TriggerMsgID string
 	ContextToken string
+	// SessionID from the triggering inbound message (incl. loose JSON keys); used if peer map has no session.
+	SessionID string
 }
 
 type queueManager struct {
@@ -113,7 +115,7 @@ func weixinFallbackWhenNoText(tape string, resp *proto.RunAgentResponse) string 
 	if len(resp.ToolCalls) == 0 {
 		if resp.Steps > 0 {
 			return fmt.Sprintf(
-				"助手未返回可见文字。本轮约 %d 步；请查 tape「%s」。若应交付文件，请确认已调用 weixin.send_file。",
+				"助手未返回可见文字。本轮约 %d 步；请查 tape「%s」。长内容可先写入文件，再用 weixin.send_text 发摘要或链接。",
 				resp.Steps, strings.TrimSpace(tape),
 			)
 		}
@@ -137,5 +139,5 @@ func weixinFallbackWhenNoText(tape string, resp *proto.RunAgentResponse) string 
 	} else {
 		ellipsis = fmt.Sprintf("（共 %d 次）", len(names))
 	}
-	return fmt.Sprintf("本轮未输出文字，已执行：%s%s。\n若含 weixin.send_file，请查看文件消息。", strings.Join(shown, ", "), ellipsis)
+	return fmt.Sprintf("本轮未输出文字，已执行：%s%s。", strings.Join(shown, ", "), ellipsis)
 }
