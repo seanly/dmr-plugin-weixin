@@ -212,8 +212,13 @@ func (p *WeixinPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			Description:    "Send plain text to current Weixin peer, or use tape_name weixin:p2p:<id> / peer_id for cron. Requires prior context_token (user messaged bot).",
 			ParametersJSON: sendTextToolParamsJSON(),
 		},
+		{
+			Name:           "weixinSendMedia",
+			Description:    "Send image/video/file to current Weixin peer. Supports local files and remote URLs (http/https). Auto-detects media type from extension or use media_type parameter.",
+			ParametersJSON: sendMediaToolParamsJSON(),
+		},
 	}
-	log.Printf("weixin: ProvideTools -> weixinSendText")
+	log.Printf("weixin: ProvideTools -> weixinSendText, weixinSendMedia")
 	return nil
 }
 
@@ -228,6 +233,19 @@ func (p *WeixinPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	switch req.Name {
 	case "weixinSendText":
 		result, err := p.execSendText(ctx, req.ArgsJSON)
+		if err != nil {
+			resp.Error = err.Error()
+			return nil
+		}
+		b, err := json.Marshal(result)
+		if err != nil {
+			resp.Error = err.Error()
+			return nil
+		}
+		resp.ResultJSON = string(b)
+		return nil
+	case "weixinSendMedia":
+		result, err := p.execSendMedia(ctx, req.ArgsJSON)
 		if err != nil {
 			resp.Error = err.Error()
 			return nil

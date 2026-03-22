@@ -24,3 +24,9 @@ dmr-plugin-weixin-darwin-arm64
 *.swp
 *.swo
 .DS_Store
+
+# Claude
+.claude/
+
+# Node
+node_modules/
