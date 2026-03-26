@@ -158,37 +158,56 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	}
 
 	// If the message has a ref_msg pointing to media, download the referenced media too.
+	// Official openclaw-weixin approach: find TEXT item with ref_msg whose message_item is media,
+	// then download directly from ref_msg.message_item CDN params.
 	var refAttachments []InboundAttachment
 	var refTextContent string
 	hasRef := false
 	for _, item := range full.ItemList {
-		if item.RefMsg == nil || item.RefMsg.MessageItem == nil {
+		if item.RefMsg == nil {
 			continue
 		}
 		hasRef = true
+
+		// Capture ref title as context.
+		if t := strings.TrimSpace(item.RefMsg.Title); t != "" && refTextContent == "" {
+			refTextContent = t
+		}
+
 		ri := item.RefMsg.MessageItem
+		if ri == nil {
+			continue
+		}
+
+		// Official approach: if ref message_item is media, download it directly.
 		if isMediaItemType(ri.Type) {
 			att, err := p.saveInboundMedia(ctx, *ri)
 			if err != nil {
-				log.Printf("weixin: save ref media type=%d peer=%q: %v", ri.Type, peerID, err)
+				log.Printf("weixin: ref media download failed type=%d peer=%q: %v", ri.Type, peerID, err)
 			} else if att != nil {
 				refAttachments = append(refAttachments, *att)
 			}
 		} else if ri.Type == itemTypeText && ri.TextItem != nil {
 			refTextContent = ri.TextItem.Text
 		}
-		// Also capture ref title as context.
-		if t := strings.TrimSpace(item.RefMsg.Title); t != "" && refTextContent == "" {
-			refTextContent = t
-		}
 	}
 
 	// Pure media message (no text, no ref) → save only, do not send to model.
 	if strings.TrimSpace(body) == "" && !hasRef {
 		if len(directAttachments) > 0 {
+			p.setRecentMedia(peerID, directAttachments)
 			log.Printf("weixin: saved %d media file(s) for peer=%q (no model run)", len(directAttachments), peerID)
 		}
 		return
+	}
+
+	// If ref_msg was present but carried no usable media/text data, fall back
+	// to the most recently saved media for this peer.
+	if hasRef && len(refAttachments) == 0 && refTextContent == "" {
+		if recent := p.popRecentMedia(peerID); len(recent) > 0 {
+			refAttachments = recent
+			log.Printf("weixin: ref_msg empty, using %d recent media file(s) for peer=%q", len(recent), peerID)
+		}
 	}
 
 	if strings.TrimSpace(body) == "" {

@@ -35,7 +35,10 @@ type cdnMedia struct {
 type imageItem struct {
 	Media      *cdnMedia `json:"media,omitempty"`
 	ThumbMedia *cdnMedia `json:"thumb_media,omitempty"`
-	MidSize    int       `json:"mid_size,omitempty"`
+	// AesKeyHex: raw AES-128 key as hex string (16 bytes); preferred over media.aes_key for inbound decryption.
+	AesKeyHex string `json:"aeskey,omitempty"`
+	URL       string `json:"url,omitempty"`
+	MidSize   int    `json:"mid_size,omitempty"`
 	// HdSize: ciphertext length for full image; some Weixin clients need this to open preview (see openclaw upload.ts comment).
 	HdSize int `json:"hd_size,omitempty"`
 	// ThumbSize / thumb_*: mobile Weixin often shows a grey box if thumb fields are missing when no_need_thumb was used on upload.
@@ -65,6 +68,11 @@ type videoItem struct {
 type refMessage struct {
 	MessageItem *messageItem `json:"message_item,omitempty"`
 	Title       string       `json:"title,omitempty"`
+	SvrID       int64        `json:"svrid,omitempty"`
+	MessageID   int64        `json:"message_id,omitempty"`
+	NewMsgID    int64        `json:"new_msg_id,omitempty"`
+	CreateTime  int64        `json:"create_time,omitempty"`
+	FromUserID  string       `json:"from_user_id,omitempty"`
 }
 
 type messageItem struct {

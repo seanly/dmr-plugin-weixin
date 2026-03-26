@@ -40,6 +40,11 @@ type WeixinPlugin struct {
 	typingMu     sync.Mutex
 	typingByPeer map[string]string
 
+	// recentMediaByPeer: last saved media attachments per peer; used as fallback
+	// when ref_msg doesn't carry CDN data (gateway limitation).
+	recentMediaMu     sync.Mutex
+	recentMediaByPeer map[string][]InboundAttachment
+
 	extraRunPrompt string
 }
 

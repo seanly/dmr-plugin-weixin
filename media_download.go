@@ -55,7 +55,17 @@ func extractMediaInfo(item messageItem) (media *cdnMedia, typeName, fileName, ex
 		if item.ImageItem == nil {
 			return nil, "", "", ""
 		}
-		return item.ImageItem.Media, "image", "", ".jpg"
+		m := item.ImageItem.Media
+		// Official openclaw-weixin: image_item.aeskey (hex) takes priority over media.aes_key.
+		if m != nil && strings.TrimSpace(item.ImageItem.AesKeyHex) != "" {
+			hexKey := strings.TrimSpace(item.ImageItem.AesKeyHex)
+			m = &cdnMedia{
+				EncryptQueryParam: m.EncryptQueryParam,
+				AesKey:            hexKey,
+				EncryptType:       m.EncryptType,
+			}
+		}
+		return m, "image", "", ".jpg"
 	case itemTypeVoice:
 		if item.VoiceItem == nil {
 			return nil, "", "", ""
@@ -117,4 +127,33 @@ func sanitizeFileName(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "\\", "_")
 	return name
+}
+
+// setRecentMedia appends saved attachments for a peer (accumulates across
+// multiple direct media messages). Capped at 20 entries to bound memory.
+func (p *WeixinPlugin) setRecentMedia(peerID string, atts []InboundAttachment) {
+	if len(atts) == 0 {
+		return
+	}
+	p.recentMediaMu.Lock()
+	defer p.recentMediaMu.Unlock()
+	if p.recentMediaByPeer == nil {
+		p.recentMediaByPeer = make(map[string][]InboundAttachment)
+	}
+	existing := p.recentMediaByPeer[peerID]
+	existing = append(existing, atts...)
+	const maxRecent = 20
+	if len(existing) > maxRecent {
+		existing = existing[len(existing)-maxRecent:]
+	}
+	p.recentMediaByPeer[peerID] = existing
+}
+
+// popRecentMedia retrieves and clears all saved attachments for a peer.
+func (p *WeixinPlugin) popRecentMedia(peerID string) []InboundAttachment {
+	p.recentMediaMu.Lock()
+	defer p.recentMediaMu.Unlock()
+	atts := p.recentMediaByPeer[peerID]
+	delete(p.recentMediaByPeer, peerID)
+	return atts
 }
