@@ -19,6 +19,12 @@ type inboundJob struct {
 	ContextToken string
 	// SessionID from the triggering inbound message (incl. loose JSON keys); used if peer map has no session.
 	SessionID string
+	// Attachments holds media files downloaded from direct (non-ref) message items.
+	Attachments []InboundAttachment
+	// RefAttachments holds media files downloaded from the referenced message.
+	RefAttachments []InboundAttachment
+	// RefTextContent is the text body of the referenced message (if it was text).
+	RefTextContent string
 }
 
 type queueManager struct {
@@ -81,7 +87,7 @@ func (p *WeixinPlugin) processJob(job *inboundJob) {
 	defer p.clearActiveJob()
 
 	userTrim := strings.TrimSpace(job.Content)
-	runPrompt := p.composeRunPrompt(job.Content)
+	runPrompt := p.composeRunPrompt(job)
 	if strings.HasPrefix(userTrim, ",") || strings.HasPrefix(userTrim, "，") {
 		if strings.HasPrefix(userTrim, "，") {
 			userTrim = "," + strings.TrimPrefix(userTrim, "，")

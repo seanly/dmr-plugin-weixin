@@ -29,35 +29,26 @@ func bodyFromItemList(items []messageItem) string {
 	if len(items) == 0 {
 		return ""
 	}
+	var parts []string
 	for _, item := range items {
 		if item.Type == itemTypeText && item.TextItem != nil && item.TextItem.Text != "" {
 			text := item.TextItem.Text
 			ref := item.RefMsg
 			if ref == nil {
-				return text
+				parts = append(parts, text)
+				continue
 			}
-			if ref.MessageItem != nil && isMediaItemType(ref.MessageItem.Type) {
-				return text
-			}
-			var parts []string
-			if ref.Title != "" {
-				parts = append(parts, ref.Title)
-			}
-			if ref.MessageItem != nil {
-				if rb := bodyFromItemList([]messageItem{*ref.MessageItem}); rb != "" {
-					parts = append(parts, rb)
-				}
-			}
-			if len(parts) == 0 {
-				return text
-			}
-			return fmt.Sprintf("[引用: %s]\n%s", strings.Join(parts, " | "), text)
+			// For ref messages, just keep the user's text; ref content is
+			// handled separately in handleInboundMessage via RefAttachments/RefTextContent.
+			parts = append(parts, text)
+			continue
 		}
 		if item.Type == itemTypeVoice && item.VoiceItem != nil && item.VoiceItem.Text != "" {
-			return item.VoiceItem.Text
+			parts = append(parts, item.VoiceItem.Text)
+			continue
 		}
 	}
-	return ""
+	return strings.Join(parts, "\n")
 }
 
 func dedupKeyForMessage(m weixinMessage) string {

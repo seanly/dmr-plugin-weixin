@@ -10,8 +10,7 @@ const weixinInboundBuiltinReportHint = `【微信·报告】长报告、多段�
 
 [Weixin reports] For long output: write to a file if needed, then summarize or reference via weixinSendText (file attachment tool not available in this build).`
 
-func (p *WeixinPlugin) composeRunPrompt(userContent string) string {
-	user := userContent
+func (p *WeixinPlugin) composeRunPrompt(job *inboundJob) string {
 	configExtra := strings.TrimSpace(p.extraRunPrompt)
 	var prefixParts []string
 	prefixParts = append(prefixParts, strings.TrimSpace(weixinInboundBuiltinSchedulingHint))
@@ -20,8 +19,56 @@ func (p *WeixinPlugin) composeRunPrompt(userContent string) string {
 		prefixParts = append(prefixParts, configExtra)
 	}
 	prefix := strings.Join(prefixParts, "\n\n")
-	if strings.TrimSpace(user) == "" {
+
+	userText := strings.TrimSpace(job.Content)
+	hasRef := len(job.RefAttachments) > 0 || job.RefTextContent != ""
+
+	if userText == "" && !hasRef {
 		return prefix
 	}
-	return prefix + "\n\n---\n\nUser message:\n" + user
+
+	var bodyParts []string
+
+	// Build referenced content section if present.
+	if hasRef {
+		var refLines []string
+		if job.RefTextContent != "" {
+			refLines = append(refLines, job.RefTextContent)
+		}
+		if len(job.RefAttachments) > 0 {
+			refLines = append(refLines, formatAttachments(job.RefAttachments))
+		}
+		bodyParts = append(bodyParts, "[引用消息]\n"+strings.Join(refLines, "\n"))
+	}
+
+	// User's own message.
+	if userText != "" {
+		bodyParts = append(bodyParts, "[用户消息]\n"+userText)
+	}
+
+	return prefix + "\n\n---\n\n" + strings.Join(bodyParts, "\n\n")
+}
+
+// formatAttachments formats attachment list for prompt injection.
+func formatAttachments(atts []InboundAttachment) string {
+	var lines []string
+	for _, a := range atts {
+		label := a.Type
+		switch a.Type {
+		case "image":
+			label = "图片"
+		case "voice":
+			label = "语音"
+		case "file":
+			label = "文件"
+		case "video":
+			label = "视频"
+		}
+		if a.FileName != "" {
+			lines = append(lines, "- "+label+": "+a.FilePath+" ("+a.FileName+")")
+		} else {
+			lines = append(lines, "- "+label+": "+a.FilePath)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

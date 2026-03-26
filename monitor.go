@@ -139,6 +139,58 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	}
 
 	body := bodyFromItemList(full.ItemList)
+
+	// Save direct media items (image/file/video/voice sent without text).
+	// These are stored to disk but do NOT trigger a model run.
+	var directAttachments []InboundAttachment
+	for _, item := range full.ItemList {
+		if !isMediaItemType(item.Type) {
+			continue
+		}
+		att, err := p.saveInboundMedia(ctx, item)
+		if err != nil {
+			log.Printf("weixin: save media type=%d peer=%q: %v", item.Type, peerID, err)
+			continue
+		}
+		if att != nil {
+			directAttachments = append(directAttachments, *att)
+		}
+	}
+
+	// If the message has a ref_msg pointing to media, download the referenced media too.
+	var refAttachments []InboundAttachment
+	var refTextContent string
+	hasRef := false
+	for _, item := range full.ItemList {
+		if item.RefMsg == nil || item.RefMsg.MessageItem == nil {
+			continue
+		}
+		hasRef = true
+		ri := item.RefMsg.MessageItem
+		if isMediaItemType(ri.Type) {
+			att, err := p.saveInboundMedia(ctx, *ri)
+			if err != nil {
+				log.Printf("weixin: save ref media type=%d peer=%q: %v", ri.Type, peerID, err)
+			} else if att != nil {
+				refAttachments = append(refAttachments, *att)
+			}
+		} else if ri.Type == itemTypeText && ri.TextItem != nil {
+			refTextContent = ri.TextItem.Text
+		}
+		// Also capture ref title as context.
+		if t := strings.TrimSpace(item.RefMsg.Title); t != "" && refTextContent == "" {
+			refTextContent = t
+		}
+	}
+
+	// Pure media message (no text, no ref) → save only, do not send to model.
+	if strings.TrimSpace(body) == "" && !hasRef {
+		if len(directAttachments) > 0 {
+			log.Printf("weixin: saved %d media file(s) for peer=%q (no model run)", len(directAttachments), peerID)
+		}
+		return
+	}
+
 	if strings.TrimSpace(body) == "" {
 		body = "[empty or non-text message]"
 	}
@@ -159,13 +211,16 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 		jobSid = strings.TrimSpace(p.sessionIDForPeer(peerID))
 	}
 	job := &inboundJob{
-		QueueKey:     tape,
-		TapeName:     tape,
-		PeerID:       peerID,
-		Content:      body,
-		TriggerMsgID: dkey,
-		ContextToken: full.inboundContextToken(),
-		SessionID:    jobSid,
+		QueueKey:        tape,
+		TapeName:        tape,
+		PeerID:          peerID,
+		Content:         body,
+		TriggerMsgID:    dkey,
+		ContextToken:    full.inboundContextToken(),
+		SessionID:       jobSid,
+		Attachments:     directAttachments,
+		RefAttachments:  refAttachments,
+		RefTextContent:  refTextContent,
 	}
 
 	if p.tryHandleDMRRestart(ctx, job, body) {
