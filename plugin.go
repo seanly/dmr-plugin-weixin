@@ -219,7 +219,7 @@ func (p *WeixinPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 		},
 		{
 			Name:           "weixinSendMedia",
-			Description:    "Send image/video/file to current Weixin peer. Supports local files and remote URLs (http/https). Auto-detects media type from extension or use media_type parameter.",
+			Description:    "Send files (images, videos, documents) to Weixin peer. Upload and send any file type from local path or remote URL (http/https). Auto-detects media type from extension or specify media_type parameter.",
 			ParametersJSON: sendMediaToolParamsJSON(),
 		},
 	}
