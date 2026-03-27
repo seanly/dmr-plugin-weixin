@@ -30,6 +30,7 @@ const (
 type approvalReply struct {
 	choice  int32
 	indices []int32
+	comment string
 }
 
 type approvalWait struct {
@@ -50,62 +51,85 @@ func newWeixinApprover(p *WeixinPlugin) *WeixinApprover {
 	}
 }
 
-func parseApprovalChoice(content string) (int32, bool) {
-	s := strings.TrimSpace(strings.ToLower(content))
+// splitByCommentMarker splits input by "//" into choice and comment.
+// Examples:
+//   "y // all good" -> ("y", "all good")
+//   "1,3 // approved" -> ("1,3", "approved")
+//   "n" -> ("n", "")
+func splitByCommentMarker(input string) (choice string, comment string) {
+	parts := strings.SplitN(input, "//", 2)
+	choice = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		comment = strings.TrimSpace(parts[1])
+	}
+	return
+}
+
+func parseApprovalChoice(content string) (int32, string, bool) {
+	// Split by "//" to separate choice from comment
+	choice, comment := splitByCommentMarker(content)
+	s := strings.TrimSpace(strings.ToLower(choice))
+
 	if s == "" {
-		return choiceDenied, true
+		return choiceDenied, comment, true
 	}
 	if utf8.RuneCountInString(s) == 1 {
 		switch s[0] {
 		case 'y':
-			return choiceApprovedOnce, true
+			return choiceApprovedOnce, comment, true
 		case 's':
-			return choiceApprovedSess, true
+			return choiceApprovedSess, comment, true
 		case 'a':
-			return choiceApprovedAlways, true
+			return choiceApprovedAlways, comment, true
 		case 'n':
-			return choiceDenied, true
+			return choiceDenied, comment, true
 		default:
-			return choiceDenied, true
+			return choiceDenied, comment, true
 		}
 	}
 	switch s {
 	case "yes":
-		return choiceApprovedOnce, true
+		return choiceApprovedOnce, comment, true
 	case "session":
-		return choiceApprovedSess, true
+		return choiceApprovedSess, comment, true
 	case "always":
-		return choiceApprovedAlways, true
+		return choiceApprovedAlways, comment, true
 	case "no":
-		return choiceDenied, true
+		return choiceDenied, comment, true
 	default:
-		return choiceDenied, true
+		return choiceDenied, comment, true
 	}
 }
 
+// parseBatchApprovalChoice mirrors CLI approver readBatchChoice: y/yes, s/session, a/always, n/no,
+// or comma-separated 1-based indices (e.g. 1,3,5). Empty or any other input denies (consumed), same safe default as CLI.
+// Also supports comments after "//": "n // security concern" or "1,3 // looks good".
 func parseBatchApprovalChoice(content string, total int) (approvalReply, bool) {
-	s := strings.TrimSpace(strings.ToLower(content))
+	// Split by "//" to separate choice from comment
+	choice, comment := splitByCommentMarker(content)
+	s := strings.TrimSpace(strings.ToLower(choice))
+
 	if s == "" {
-		return approvalReply{choice: choiceDenied}, true
+		return approvalReply{choice: choiceDenied, comment: comment}, true
 	}
 	switch s {
 	case "y", "yes":
-		return approvalReply{choice: choiceApprovedOnce}, true
+		return approvalReply{choice: choiceApprovedOnce, comment: comment}, true
 	case "s", "session":
-		return approvalReply{choice: choiceApprovedSess}, true
+		return approvalReply{choice: choiceApprovedSess, comment: comment}, true
 	case "a", "always":
-		return approvalReply{choice: choiceApprovedAlways}, true
+		return approvalReply{choice: choiceApprovedAlways, comment: comment}, true
 	case "n", "no":
-		return approvalReply{choice: choiceDenied}, true
+		return approvalReply{choice: choiceDenied, comment: comment}, true
 	}
 	if strings.Contains(s, ",") || isAllASCIIDigits(s) {
 		indices, err := parseApprovalIndices(s, total)
 		if err != nil {
-			return approvalReply{choice: choiceDenied}, true
+			return approvalReply{choice: choiceDenied, comment: comment}, true
 		}
-		return approvalReply{choice: choiceApprovedOnce, indices: indices}, true
+		return approvalReply{choice: choiceApprovedOnce, indices: indices, comment: comment}, true
 	}
-	return approvalReply{choice: choiceDenied}, true
+	return approvalReply{choice: choiceDenied, comment: comment}, true
 }
 
 func isAllASCIIDigits(s string) bool {
@@ -147,11 +171,11 @@ func (a *WeixinApprover) tryResolveP2P(peerID, content string) bool {
 	}
 	var reply approvalReply
 	if entry.batchN == 0 {
-		c, ok := parseApprovalChoice(content)
+		c, comment, ok := parseApprovalChoice(content)
 		if !ok {
 			return false
 		}
-		reply = approvalReply{choice: c}
+		reply = approvalReply{choice: c, comment: comment}
 	} else {
 		var ok bool
 		reply, ok = parseBatchApprovalChoice(content, entry.batchN)
@@ -338,15 +362,21 @@ func (a *WeixinApprover) handleSingle(req *proto.ApprovalRequest, resp *proto.Ap
 	b.WriteString("\n")
 	b.WriteString(formatApprovalArgsMarkdown(req.Tool, argsStr, maxApprovalContentRunesSingle))
 	b.WriteString("\n### Reply\n\n")
-	b.WriteString("Reply with one letter:\n")
-	b.WriteString("- y — approve once\n")
-	b.WriteString("- s — approve session\n")
-	b.WriteString("- a — approve always\n")
-	b.WriteString("- n — deny\n")
+	b.WriteString("Reply with one letter:\n\n")
+	b.WriteString("- **y** — approve once\n")
+	b.WriteString("- **s** — approve session\n")
+	b.WriteString("- **a** — approve always\n")
+	b.WriteString("- **n** — deny\n")
+	b.WriteString("\n*(Any other reply counts as **deny**.)*\n")
+	b.WriteString("\nYou can add a comment after `//`:\n")
+	b.WriteString("- Example: `n // security concern`\n")
+	b.WriteString("- Example: `y // looks safe`\n")
+
 	body := b.String()
 	reply := a.waitApproval(peerID, body, 0)
 	resp.Choice = reply.choice
-	if resp.Choice == choiceDenied {
+	resp.Comment = reply.comment
+	if resp.Choice == choiceDenied && resp.Comment == "" {
 		resp.Comment = "denied or timeout"
 	}
 }
@@ -399,13 +429,19 @@ func (a *WeixinApprover) handleBatch(req *proto.BatchApprovalRequest, resp *prot
 		b.WriteString("\n\n")
 	}
 	b.WriteString("### Reply\n\n")
-	b.WriteString("- y / yes — approve all (once)\n")
-	fmt.Fprintf(&b, "- 1–%d or 1,3,5 — approve listed (once)\n", n)
-	b.WriteString("- s / session — session\n")
-	b.WriteString("- a / always — always\n")
-	b.WriteString("- n / no — deny all\n")
+	b.WriteString("- **y** or **yes** — approve **all** (once)\n")
+	fmt.Fprintf(&b, "- **1–%d** or comma-separated (e.g. `1,3,5`) — approve only those items (once)\n", n)
+	b.WriteString("- **s** or **session** — allow **all** for this session\n")
+	b.WriteString("- **a** or **always** — always allow **all**\n")
+	b.WriteString("- **n** or **no** — deny **all**\n")
+	b.WriteString("\n*(Any other reply counts as **deny**.)*\n")
+	b.WriteString("\nYou can add a comment after `//`:\n")
+	b.WriteString("- Example: `n // security concern`\n")
+	b.WriteString("- Example: `1,3 // approved, others look risky`\n")
+
 	reply := a.waitApproval(peerID, b.String(), n)
 	resp.Choice = reply.choice
+	resp.Comment = reply.comment
 	if reply.indices != nil {
 		resp.Approved = reply.indices
 	} else {
