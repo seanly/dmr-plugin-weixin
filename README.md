@@ -108,7 +108,7 @@ Inbound private chat: **`weixin:p2p:<from_user_id>`** (e.g. `xxx@im.wechat`). On
 
 ## Tools
 
-- **`weixinSendText`** — Plain text to current peer when run from inbound context; for cron use `tape_name` or `peer_id`. Needs a **cached `context_token`**. Set **`DMR_WEIXIN_DEBUG_SEND=1`** on `dmr serve` to log truncated `sendmessage` JSON when debugging delivery.
+- **`weixinSendText`** — Plain text to current peer when run from inbound context; for **cron-fired** runs (no inbound context) use `tape_name` or `peer_id`. Needs a **cached `context_token`**. Set **`DMR_WEIXIN_DEBUG_SEND=1`** on `dmr serve` to log truncated `sendmessage` JSON when debugging delivery.
 
 ## Approvals
 
@@ -116,7 +116,7 @@ Only **`weixin:p2p:*`** tapes. Plain-text prompts. Replies: **y / s / a / n** (s
 
 ## Cron
 
-Use tape **`weixin:p2p:<peer_id>`** with `dmr-plugin-cron`; deliver with **`weixinSendText`** and `tape_name` / `peer_id` — same pattern as Feishu + `feishuSendText`.
+Add jobs **in this Weixin chat** so `cronAdd` binds the current session tape (`weixin:p2p:<peer_id>`); the tool does not accept `tape_name`. When the job runs, deliver with **`weixinSendText`** using `tape_name` / `peer_id` (scheduled runs have no inbound context)—same idea as Feishu + `feishuSendText`.
 
 ## Development
 

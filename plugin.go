@@ -214,7 +214,7 @@ func (p *WeixinPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 	resp.Tools = []proto.ToolDef{
 		{
 			Name:           "weixinSendText",
-			Description:    "Send plain text to current Weixin peer, or use tape_name weixin:p2p:<id> / peer_id for cron. Requires prior context_token (user messaged bot).",
+			Description:    "Send plain text to current Weixin peer, or use tape_name weixin:p2p:<id> / peer_id for cron-fired runs (no inbound context). Requires prior context_token (user messaged bot).",
 			ParametersJSON: sendTextToolParamsJSON(),
 		},
 		{
