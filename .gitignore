@@ -3,10 +3,8 @@ dmr-plugin-weixin
 dmr-weixin-login
 
 # Cross-build artifacts (make cross-build)
-dmr-plugin-weixin-linux-amd64
-dmr-plugin-weixin-linux-arm64
-dmr-plugin-weixin-darwin-amd64
-dmr-plugin-weixin-darwin-arm64
+dmr-plugin-weixin-*
+dmr-weixin-*
 
 # Go
 *.exe
