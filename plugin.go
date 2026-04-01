@@ -149,9 +149,6 @@ func (p *WeixinPlugin) Init(req *proto.InitRequest, resp *proto.InitResponse) er
 	if strings.TrimSpace(cfg.Token) == "" {
 		return fmt.Errorf("weixin: token is required")
 	}
-	if strings.TrimSpace(cfg.DmrRestartToken) != "" && len(cfg.AllowFrom) == 0 {
-		return fmt.Errorf("weixin: dmr_restart_token requires allow_from")
-	}
 
 	resolvedExtra, err := buildResolvedExtraPrompt(cfg)
 	if err != nil {

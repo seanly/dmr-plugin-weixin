@@ -242,10 +242,6 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 		RefTextContent:  refTextContent,
 	}
 
-	if p.tryHandleDMRRestart(ctx, job, body) {
-		return
-	}
-
 	if p.queues != nil {
 		p.queues.enqueue(job)
 	}

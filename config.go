@@ -34,8 +34,6 @@ type WeixinConfig struct {
 	DedupTTLMinutes    int      `json:"dedup_ttl_minutes"`
 	ExtraPrompt        string   `json:"extra_prompt"`
 	ExtraPromptFile    string   `json:"extra_prompt_file"`
-	DmrRestartTrigger  string   `json:"dmr_restart_trigger"`
-	DmrRestartToken    string   `json:"dmr_restart_token"`
 }
 
 func defaultWeixinConfig() WeixinConfig {
