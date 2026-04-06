@@ -239,7 +239,7 @@ func (p *WeixinPlugin) sendWeixinMediaFile(ctx context.Context, filePath, peerID
 }
 
 // execSendMedia executes the weixinSendMedia tool
-func (p *WeixinPlugin) execSendMedia(ctx context.Context, argsJSON string) (map[string]any, error) {
+func (p *WeixinPlugin) execSendMedia(ctx context.Context, argsJSON string, toolCtx map[string]any) (map[string]any, error) {
 	var raw map[string]any
 	if strings.TrimSpace(argsJSON) == "" {
 		raw = map[string]any{}
@@ -273,20 +273,23 @@ func (p *WeixinPlugin) execSendMedia(ctx context.Context, argsJSON string) (map[
 		return nil, fmt.Errorf("file not found: %s", filePath)
 	}
 
-	// Determine peer ID
-	job := p.getActiveJob()
+	// Determine peer ID from context or arguments
+	ctxPeerID, _ := toolCtx["peer_id"].(string)
+	ctxToken, _ := toolCtx["context_token"].(string)
 	var peerID, contextToken string
 
-	if job != nil {
+	if ctxPeerID != "" {
+		// We have context from RunAgent
 		if tapeName != "" || peerArg != "" {
 			return nil, fmt.Errorf("do not set tape_name or peer_id during a Weixin-triggered RunAgent")
 		}
-		peerID = job.PeerID
-		contextToken = strings.TrimSpace(job.ContextToken)
+		peerID = ctxPeerID
+		contextToken = strings.TrimSpace(ctxToken)
 		if contextToken == "" {
 			contextToken = p.tokens.get(peerID)
 		}
 	} else {
+		// No context from RunAgent, use explicit tape_name or peer_id
 		if tapeName != "" && peerArg != "" {
 			return nil, fmt.Errorf("provide at most one of tape_name or peer_id")
 		}

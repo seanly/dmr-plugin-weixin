@@ -72,12 +72,9 @@ func (p *WeixinPlugin) sendBotMessage(ctx context.Context, peerID, contextToken 
 		ContextToken:    contextToken,
 		ContextTokCamel: contextToken,
 	}
+	// Get session ID from the session store
+	// The store is updated when we receive inbound messages
 	sid := p.sessionIDForPeer(peerID)
-	if sid == "" {
-		if j := p.getActiveJob(); j != nil && strings.TrimSpace(j.PeerID) == strings.TrimSpace(peerID) {
-			sid = strings.TrimSpace(j.SessionID)
-		}
-	}
 	if sid != "" {
 		msg.SessionID = sessionIDJSON(sid)
 	}

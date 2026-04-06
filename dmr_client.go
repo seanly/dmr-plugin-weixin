@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/rpc"
 
@@ -18,6 +19,10 @@ func (p *WeixinPlugin) hostRPC() (*rpc.Client, error) {
 }
 
 func (p *WeixinPlugin) callRunAgent(tapeName, prompt string, historyAfter int32) (*proto.RunAgentResponse, error) {
+	return p.callRunAgentWithContext(tapeName, prompt, historyAfter, nil)
+}
+
+func (p *WeixinPlugin) callRunAgentWithContext(tapeName, prompt string, historyAfter int32, ctx map[string]any) (*proto.RunAgentResponse, error) {
 	c, err := p.hostRPC()
 	if err != nil {
 		return nil, err
@@ -26,6 +31,11 @@ func (p *WeixinPlugin) callRunAgent(tapeName, prompt string, historyAfter int32)
 		TapeName:            tapeName,
 		Prompt:              prompt,
 		HistoryAfterEntryID: historyAfter,
+	}
+	// Encode context if provided
+	if ctx != nil && len(ctx) > 0 {
+		ctxJSON, _ := json.Marshal(ctx)
+		req.ContextJSON = string(ctxJSON)
 	}
 	var resp proto.RunAgentResponse
 	if err := c.Call("Plugin.RunAgent", req, &resp); err != nil {

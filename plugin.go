@@ -29,9 +29,6 @@ type WeixinPlugin struct {
 	queues   *queueManager
 	tokens   *contextTokenStore
 
-	activeJobMu sync.Mutex
-	activeJob   *inboundJob
-
 	// lastSessionByPeer stores session_id from inbound msgs; outbound sendmessage may need it for file/media delivery.
 	sessionMu         sync.Mutex
 	lastSessionByPeer map[string]string
@@ -56,24 +53,6 @@ func NewWeixinPlugin() *WeixinPlugin {
 	p.approver = newWeixinApprover(p)
 	p.queues = newQueueManager(p)
 	return p
-}
-
-func (p *WeixinPlugin) setActiveJob(job *inboundJob) {
-	p.activeJobMu.Lock()
-	p.activeJob = job
-	p.activeJobMu.Unlock()
-}
-
-func (p *WeixinPlugin) clearActiveJob() {
-	p.activeJobMu.Lock()
-	p.activeJob = nil
-	p.activeJobMu.Unlock()
-}
-
-func (p *WeixinPlugin) getActiveJob() *inboundJob {
-	p.activeJobMu.Lock()
-	defer p.activeJobMu.Unlock()
-	return p.activeJob
 }
 
 func (p *WeixinPlugin) rememberSessionForPeer(peerID, sessionID string) {
@@ -232,9 +211,30 @@ func (p *WeixinPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	}
 	p.runMu.Unlock()
 
+	// Parse context from the request (passed from RunAgent)
+	toolCtx := make(map[string]any)
+	if req.ContextJSON != "" {
+		if err := json.Unmarshal([]byte(req.ContextJSON), &toolCtx); err != nil {
+			log.Printf("weixin: CallTool %s failed to parse context JSON: %v", req.Name, err)
+		}
+	}
+
+	// Extract peer_id from context or session tape
+	peerID, _ := toolCtx["peer_id"].(string)
+	if peerID == "" {
+		// Fallback: try to extract from session tape (e.g., "weixin:p2p:wxid_xxx")
+		peerID = weixinP2PTapeToPeerIDOrEmpty(req.SessionTape)
+	}
+
+	if peerID != "" {
+		log.Printf("weixin: CallTool %s peer_id=%q", req.Name, peerID)
+	} else {
+		log.Printf("weixin: CallTool %s (no peer_id in context or tape %q)", req.Name, req.SessionTape)
+	}
+
 	switch req.Name {
 	case "weixinSendText":
-		result, err := p.execSendText(ctx, req.ArgsJSON)
+		result, err := p.execSendText(ctx, req.ArgsJSON, toolCtx)
 		if err != nil {
 			resp.Error = err.Error()
 			return nil
@@ -247,7 +247,7 @@ func (p *WeixinPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 		resp.ResultJSON = string(b)
 		return nil
 	case "weixinSendMedia":
-		result, err := p.execSendMedia(ctx, req.ArgsJSON)
+		result, err := p.execSendMedia(ctx, req.ArgsJSON, toolCtx)
 		if err != nil {
 			resp.Error = err.Error()
 			return nil
@@ -263,4 +263,18 @@ func (p *WeixinPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 		resp.Error = fmt.Sprintf("unknown tool: %s", req.Name)
 		return nil
 	}
+}
+
+// weixinP2PTapeToPeerIDOrEmpty extracts peer_id from weixin:p2p:<peer_id> tape name.
+// Returns empty string if not a valid weixin p2p tape.
+func weixinP2PTapeToPeerIDOrEmpty(tapeName string) string {
+	const prefix = "weixin:p2p:"
+	s := strings.TrimSpace(tapeName)
+	if s == "" {
+		return ""
+	}
+	if !strings.HasPrefix(s, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(s[len(prefix):])
 }

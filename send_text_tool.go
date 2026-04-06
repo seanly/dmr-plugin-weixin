@@ -64,7 +64,7 @@ func argStringTool(m map[string]any, key string) string {
 	}
 }
 
-func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string) (map[string]any, error) {
+func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string, toolCtx map[string]any) (map[string]any, error) {
 	var raw map[string]any
 	if strings.TrimSpace(argsJSON) == "" {
 		raw = map[string]any{}
@@ -78,21 +78,26 @@ func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string) (map[s
 	tapeName := argStringTool(raw, "tape_name")
 	peerArg := argStringTool(raw, "peer_id")
 
-	job := p.getActiveJob()
-	if job != nil {
+	// First, try to get peer_id and context_token from tool context (passed from RunAgent)
+	ctxPeerID, _ := toolCtx["peer_id"].(string)
+	ctxToken, _ := toolCtx["context_token"].(string)
+
+	// If we have context from RunAgent, use it
+	if ctxPeerID != "" {
 		if tapeName != "" || peerArg != "" {
 			return nil, fmt.Errorf("do not set tape_name or peer_id during a Weixin-triggered RunAgent")
 		}
-		tok := strings.TrimSpace(job.ContextToken)
+		tok := strings.TrimSpace(ctxToken)
 		if tok == "" {
-			tok = p.tokens.get(job.PeerID)
+			tok = p.tokens.get(ctxPeerID)
 		}
-		if err := p.sendTextToPeer(ctx, job.PeerID, tok, text, false); err != nil {
+		if err := p.sendTextToPeer(ctx, ctxPeerID, tok, text, false); err != nil {
 			return nil, err
 		}
-		return map[string]any{"ok": true, "peer_id": job.PeerID}, nil
+		return map[string]any{"ok": true, "peer_id": ctxPeerID}, nil
 	}
 
+	// No context from RunAgent, use explicit tape_name or peer_id
 	if tapeName != "" && peerArg != "" {
 		return nil, fmt.Errorf("provide at most one of tape_name or peer_id")
 	}

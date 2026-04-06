@@ -191,15 +191,9 @@ func (a *WeixinApprover) tryResolveP2P(peerID, content string) bool {
 }
 
 func (a *WeixinApprover) resolveContextToken(peerID string) string {
-	tok := a.plugin.tokens.get(peerID)
-	if tok != "" {
-		return tok
-	}
-	j := a.plugin.getActiveJob()
-	if j != nil && j.PeerID == peerID {
-		return strings.TrimSpace(j.ContextToken)
-	}
-	return ""
+	// Get context token from the token store
+	// The token store is updated whenever we receive an inbound message
+	return a.plugin.tokens.get(peerID)
 }
 
 func (a *WeixinApprover) waitApproval(peerID, prompt string, batchN int) approvalReply {

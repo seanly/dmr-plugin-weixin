@@ -83,8 +83,6 @@ func (p *WeixinPlugin) processJob(job *inboundJob) {
 		return
 	}
 	ctx := context.Background()
-	p.setActiveJob(job)
-	defer p.clearActiveJob()
 
 	userTrim := strings.TrimSpace(job.Content)
 	runPrompt := p.composeRunPrompt(job)
@@ -94,7 +92,17 @@ func (p *WeixinPlugin) processJob(job *inboundJob) {
 		}
 		runPrompt = userTrim
 	}
-	resp, err := p.callRunAgent(job.TapeName, runPrompt, 0)
+
+	// Build context to pass to RunAgent - this replaces the active job mechanism
+	// Tools will receive this context via CallToolRequest.ContextJSON
+	jobCtx := map[string]any{
+		"peer_id":              job.PeerID,
+		"trigger_msg_id":       job.TriggerMsgID,
+		"context_token":        job.ContextToken,
+		"session_id":           job.SessionID,
+	}
+
+	resp, err := p.callRunAgentWithContext(job.TapeName, runPrompt, 0, jobCtx)
 	if err != nil {
 		log.Printf("weixin: RunAgent RPC error: %v", err)
 		_ = p.replyAgentOutput(ctx, job, "DMR: RunAgent failed: "+err.Error())
