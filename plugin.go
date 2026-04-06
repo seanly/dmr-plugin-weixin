@@ -192,11 +192,15 @@ func (p *WeixinPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			Name:           "weixinSendText",
 			Description:    "Send plain text to current Weixin peer, or use tape_name weixin:p2p:<id> / peer_id for cron-fired runs (no inbound context). Requires prior context_token (user messaged bot).",
 			ParametersJSON: sendTextToolParamsJSON(),
+			Group:          "extended",
+			SearchHint:     "weixin, send, text, message, chat, im, 微信, 发送, 消息",
 		},
 		{
 			Name:           "weixinSendMedia",
 			Description:    "Send files (images, videos, documents) to Weixin peer. Upload and send any file type from local path or remote URL (http/https). Auto-detects media type from extension or specify media_type parameter.",
 			ParametersJSON: sendMediaToolParamsJSON(),
+			Group:          "extended",
+			SearchHint:     "weixin, send, file, image, video, document, media, 微信, 发送, 文件, 图片",
 		},
 	}
 	log.Printf("weixin: ProvideTools -> weixinSendText, weixinSendMedia")
