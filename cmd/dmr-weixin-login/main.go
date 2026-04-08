@@ -81,12 +81,14 @@ func main() {
 	fmt.Fprintf(os.Stderr, "set in dmr config:\n  credentials_path: %s\n", path)
 }
 
+// defaultOutPath returns the V2 standard path for weixin credentials.
+// ~/.dmr/var/lib/weixin/credentials.json
 func defaultOutPath() string {
 	h, _ := os.UserHomeDir()
 	if h == "" {
-		return ".dmr/weixin/credentials.json"
+		return ".dmr/var/lib/weixin/credentials.json"
 	}
-	return filepath.Join(h, ".dmr", "weixin", "credentials.json")
+	return filepath.Join(h, ".dmr", "var", "lib", "weixin", "credentials.json")
 }
 
 func expandHome(p string) string {

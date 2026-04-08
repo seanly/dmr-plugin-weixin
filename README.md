@@ -58,7 +58,7 @@ make test         # go test ./...
 make install      # copies plugin + login helper to ~/.dmr/plugins/
 ```
 
-**Login once** (writes `~/.dmr/weixin/credentials.json` by default):
+**Login once** (writes `~/.dmr/var/lib/weixin/credentials.json` by default):
 
 ```bash
 ./dmr-weixin-login
@@ -86,7 +86,7 @@ plugins:
       # cdn_base_url: "https://cdn.example.com"
       # token: "your-bot-token"
       # Option B: after ./dmr-weixin-login — file overlays the three keys
-      credentials_path: ~/.dmr/weixin/credentials.json
+      credentials_path: var/lib/weixin/credentials.json  # V2 standard path, relative to ~/.dmr/
       # account_id: "default"   # optional; default is default
       allow_from: []
       approval_timeout_sec: 300

@@ -1,8 +1,9 @@
-.PHONY: build login-build install clean tidy cross-build test
+.PHONY: build login-build install install-policy clean tidy cross-build test
 
 BINARY := dmr-plugin-weixin
 LOGIN_BINARY := dmr-weixin-login
 INSTALL_DIR := $(HOME)/.dmr/plugins
+POLICY_DIR := $(HOME)/.dmr/etc/policies
 
 build: tidy
 	go build -o $(BINARY) .
@@ -35,6 +36,10 @@ install: build login-build
 	cp $(BINARY) $(INSTALL_DIR)/
 	cp $(LOGIN_BINARY) $(INSTALL_DIR)/
 	@echo "Installed to $(INSTALL_DIR)/$(BINARY) and $(INSTALL_DIR)/$(LOGIN_BINARY)"
+
+install-policy:
+	mkdir -p $(POLICY_DIR)
+	cp policies/weixin.rego $(POLICY_DIR)/
 
 clean:
 	rm -f $(BINARY) $(LOGIN_BINARY) \

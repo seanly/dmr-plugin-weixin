@@ -22,6 +22,7 @@ type WeixinConfig struct {
 	// Token is sent as Authorization: Bearer <token> (do not include the "Bearer " prefix in YAML).
 	Token string `json:"token"`
 	// CredentialsPath is optional JSON written by dmr-weixin-login; non-empty fields overlay gateway_base_url, cdn_base_url, token.
+	// V2 standard path: ~/.dmr/var/lib/weixin/credentials.json (relative to ~/.dmr: var/lib/weixin/credentials.json)
 	CredentialsPath string `json:"credentials_path"`
 	// SKRouteTag optional header SKRouteTag.
 	SKRouteTag string `json:"sk_route_tag"`
