@@ -1,0 +1,248 @@
+package weixin
+
+import (
+	"context"
+	"log"
+	"strings"
+	"time"
+)
+
+const (
+	defaultLongPollTimeoutMS = 35_000
+	maxConsecutiveFailures   = 3
+	backoffDelay             = 30 * time.Second
+	retryDelay               = 2 * time.Second
+	sessionPauseDuration     = time.Hour
+)
+
+func (p *WeixinPlugin) monitorLoop(ctx context.Context) {
+	buf := p.loadSyncBuf()
+	nextTimeout := time.Duration(defaultLongPollTimeoutMS) * time.Millisecond
+	consecutive := 0
+	var pauseUntil time.Time
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("weixin: monitor stopped")
+			return
+		default:
+		}
+
+		if !pauseUntil.IsZero() {
+			if time.Now().Before(pauseUntil) {
+				sleep := time.Until(pauseUntil)
+				log.Printf("weixin: session pause %v remaining", sleep)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(sleep):
+				}
+				continue
+			}
+			pauseUntil = time.Time{}
+		}
+
+		pollCtx, cancel := context.WithTimeout(ctx, nextTimeout)
+		resp, err := p.getUpdates(pollCtx, buf, nextTimeout)
+		cancel()
+
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			consecutive++
+			log.Printf("weixin: getUpdates error (%d/%d): %v", consecutive, maxConsecutiveFailures, err)
+			if consecutive >= maxConsecutiveFailures {
+				consecutive = 0
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoffDelay):
+				}
+			} else {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(retryDelay):
+				}
+			}
+			continue
+		}
+
+		apiErr := (resp.Ret != 0) || (resp.Errcode != 0)
+		if apiErr {
+			if resp.Errcode == sessionExpiredErrcode || resp.Ret == sessionExpiredErrcode {
+				log.Printf("weixin: session expired (errcode %d), pausing 1h", sessionExpiredErrcode)
+				pauseUntil = time.Now().Add(sessionPauseDuration)
+				consecutive = 0
+				continue
+			}
+			consecutive++
+			log.Printf("weixin: getUpdates ret=%d errcode=%d msg=%q (%d/%d)", resp.Ret, resp.Errcode, resp.Errmsg, consecutive, maxConsecutiveFailures)
+			if consecutive >= maxConsecutiveFailures {
+				consecutive = 0
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoffDelay):
+				}
+			} else {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(retryDelay):
+				}
+			}
+			continue
+		}
+		consecutive = 0
+
+		if resp.LongpollingTimeoutMs > 0 {
+			nextTimeout = time.Duration(resp.LongpollingTimeoutMs) * time.Millisecond
+		}
+		if resp.GetUpdatesBuf != "" {
+			p.saveSyncBuf(resp.GetUpdatesBuf)
+			buf = resp.GetUpdatesBuf
+		}
+
+		for _, full := range resp.Msgs {
+			p.handleInboundMessage(ctx, full)
+		}
+	}
+}
+
+func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMessage) {
+	if strings.TrimSpace(full.GroupID) != "" {
+		log.Printf("weixin: skip group message group_id=%q", full.GroupID)
+		return
+	}
+	if full.MessageType == msgTypeBot {
+		return
+	}
+	peerID := strings.TrimSpace(full.FromUserID)
+	if peerID == "" {
+		return
+	}
+	if tok := full.inboundContextToken(); tok != "" {
+		p.tokens.set(peerID, tok)
+		p.prefetchOutboundSession(ctx, peerID, tok)
+	}
+	if sid := full.inboundSessionID(); sid != "" {
+		p.rememberSessionForPeer(peerID, sid)
+	}
+
+	dkey := dedupKeyForMessage(full)
+	if dkey != "" && p.dedup != nil && p.dedup.isDuplicate(dkey) {
+		log.Printf("weixin: dedup skip %s peer=%q", dkey, peerID)
+		return
+	}
+
+	body := bodyFromItemList(full.ItemList)
+
+	// Save direct media items (image/file/video/voice sent without text).
+	// These are stored to disk but do NOT trigger a model run.
+	var directAttachments []InboundAttachment
+	for _, item := range full.ItemList {
+		if !isMediaItemType(item.Type) {
+			continue
+		}
+		att, err := p.saveInboundMedia(ctx, item)
+		if err != nil {
+			log.Printf("weixin: save media type=%d peer=%q: %v", item.Type, peerID, err)
+			continue
+		}
+		if att != nil {
+			directAttachments = append(directAttachments, *att)
+		}
+	}
+
+	// If the message has a ref_msg pointing to media, download the referenced media too.
+	// Official openclaw-weixin approach: find TEXT item with ref_msg whose message_item is media,
+	// then download directly from ref_msg.message_item CDN params.
+	var refAttachments []InboundAttachment
+	var refTextContent string
+	hasRef := false
+	for _, item := range full.ItemList {
+		if item.RefMsg == nil {
+			continue
+		}
+		hasRef = true
+
+		// Capture ref title as context.
+		if t := strings.TrimSpace(item.RefMsg.Title); t != "" && refTextContent == "" {
+			refTextContent = t
+		}
+
+		ri := item.RefMsg.MessageItem
+		if ri == nil {
+			continue
+		}
+
+		// Official approach: if ref message_item is media, download it directly.
+		if isMediaItemType(ri.Type) {
+			att, err := p.saveInboundMedia(ctx, *ri)
+			if err != nil {
+				log.Printf("weixin: ref media download failed type=%d peer=%q: %v", ri.Type, peerID, err)
+			} else if att != nil {
+				refAttachments = append(refAttachments, *att)
+			}
+		} else if ri.Type == itemTypeText && ri.TextItem != nil {
+			refTextContent = ri.TextItem.Text
+		}
+	}
+
+	// Pure media message (no text, no ref) → save only, do not send to model.
+	if strings.TrimSpace(body) == "" && !hasRef {
+		if len(directAttachments) > 0 {
+			p.setRecentMedia(peerID, directAttachments)
+			log.Printf("weixin: saved %d media file(s) for peer=%q (no model run)", len(directAttachments), peerID)
+		}
+		return
+	}
+
+	// If ref_msg was present but carried no usable media/text data, fall back
+	// to the most recently saved media for this peer.
+	if hasRef && len(refAttachments) == 0 && refTextContent == "" {
+		if recent := p.popRecentMedia(peerID); len(recent) > 0 {
+			refAttachments = recent
+			log.Printf("weixin: ref_msg empty, using %d recent media file(s) for peer=%q", len(recent), peerID)
+		}
+	}
+
+	if strings.TrimSpace(body) == "" {
+		body = "[empty or non-text message]"
+	}
+
+	if p.approver != nil && p.approver.tryResolveP2P(peerID, body) {
+		log.Printf("weixin: approval reply consumed peer=%q", peerID)
+		return
+	}
+
+	if !isAllowedSender(p.cfg.AllowFrom, peerID) {
+		log.Printf("weixin: sender not allowed peer=%q", peerID)
+		return
+	}
+
+	tape := tapeNameForP2P(peerID)
+	jobSid := strings.TrimSpace(full.inboundSessionID())
+	if jobSid == "" {
+		jobSid = strings.TrimSpace(p.sessionIDForPeer(peerID))
+	}
+	job := &inboundJob{
+		QueueKey:        tape,
+		TapeName:        tape,
+		PeerID:          peerID,
+		Content:         body,
+		TriggerMsgID:    dkey,
+		ContextToken:    full.inboundContextToken(),
+		SessionID:       jobSid,
+		Attachments:     directAttachments,
+		RefAttachments:  refAttachments,
+		RefTextContent:  refTextContent,
+	}
+
+	if p.queues != nil {
+		p.queues.enqueue(job)
+	}
+}

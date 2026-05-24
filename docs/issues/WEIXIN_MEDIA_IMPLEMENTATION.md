@@ -507,9 +507,9 @@ UPLOAD_MAX_RETRIES = 3;                // CDN上传重试次数
 在现有的文本发送基础上，添加媒体发送能力：
 
 ```typescript
-// 新增工具: weixinSendMedia
+// 新增工具: weixinSendFile
 {
-  name: 'weixinSendMedia',
+  name: 'weixinSendFile',
   description: '发送图片/视频/文件到微信',
   parameters: {
     to: 'string',

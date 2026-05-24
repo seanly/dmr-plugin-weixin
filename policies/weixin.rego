@@ -3,11 +3,11 @@
 
 package dmr
 
-# All weixin operations are allowed by default
+# All Weixin send tools allowed without approval (human-in-the-loop off for these tools).
 
-decision := {"action": "allow", "reason": "weixin operation", "risk": "low"} if {
+decision := {"action": "allow", "reason": "weixin: send allowed by policy", "risk": "low"} if {
 	input.tool in [
 		"weixinSendText",
-		"weixinSendMedia"
+		"weixinSendFile",
 	]
 }

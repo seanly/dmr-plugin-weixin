@@ -1,30 +1,23 @@
-# Binaries (make build / make login-build)
-dmr-plugin-weixin
-dmr-weixin-login
-
-# Cross-build artifacts (make cross-build)
-dmr-plugin-weixin-*
-dmr-weixin-*
+# Binary (local build / install artifact)
+bin/
+/dmr-plugin-weixin
+/dmr-plugin-weixin-*
+/dmr-weixin-login
+/dmr-weixin-login-*
+*.exe
 
 # Go
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
 *.test
 *.out
-/vendor/
+coverage.out
+vendor/
 
-# IDE / OS
+# Go workspace (copy go.work.example → go.work locally; often uses sibling ../dmr)
+go.work
+go.work.sum
+
+# Editor / OS
 .idea/
 .vscode/
 *.swp
-*.swo
 .DS_Store
-
-# Claude
-.claude/
-
-# Node
-node_modules/
