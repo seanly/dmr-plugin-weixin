@@ -6,19 +6,35 @@ import (
 )
 
 func tapeNameForP2P(peerID string) string {
-	return "weixin:p2p:" + peerID
+	return legacyTape(peerID)
+}
+
+// parseWeixinP2PTape parses legacy weixin:p2p:<peer> or multi-bot weixin:<id>:p2p:<peer>.
+func parseWeixinP2PTape(tape string) (peerID string, botLabel string, ok bool) {
+	tape = strings.TrimSpace(tape)
+	const prefix = "weixin:"
+	if !strings.HasPrefix(tape, prefix) {
+		return "", "", false
+	}
+	body := tape[len(prefix):]
+	const p2pPref = "p2p:"
+	if strings.HasPrefix(body, p2pPref) {
+		peer := strings.TrimSpace(strings.TrimPrefix(body, p2pPref))
+		return peer, "", peer != ""
+	}
+	const sep = ":p2p:"
+	idx := strings.Index(body, sep)
+	if idx <= 0 {
+		return "", "", false
+	}
+	botLabel = strings.TrimSpace(body[:idx])
+	peer := strings.TrimSpace(body[idx+len(sep):])
+	return peer, botLabel, botLabel != "" && peer != ""
 }
 
 func p2pPeerFromTape(tape string) (peerID string, ok bool) {
-	const p = "weixin:p2p:"
-	if !strings.HasPrefix(tape, p) {
-		return "", false
-	}
-	id := strings.TrimSpace(tape[len(p):])
-	if id == "" {
-		return "", false
-	}
-	return id, true
+	p, _, ok := parseWeixinP2PTape(tape)
+	return p, ok
 }
 
 func isMediaItemType(t int) bool {

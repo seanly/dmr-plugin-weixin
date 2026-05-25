@@ -42,16 +42,16 @@ func randomWechatUINHeader() (string, error) {
 	return base64.StdEncoding.EncodeToString([]byte(s)), nil
 }
 
-func (p *WeixinPlugin) buildBaseInfo() baseInfo {
-	v := strings.TrimSpace(p.cfg.ChannelVersion)
+func (b *weixinBot) buildBaseInfo() baseInfo {
+	v := strings.TrimSpace(b.channelVer)
 	if v == "" {
 		v = "1.0.2"
 	}
 	return baseInfo{ChannelVersion: v}
 }
 
-func (p *WeixinPlugin) postJSON(ctx context.Context, relPath string, body any, timeout time.Duration) ([]byte, error) {
-	base := ensureTrailingSlash(strings.TrimSpace(p.cfg.GatewayBaseURL))
+func (b *weixinBot) postJSON(ctx context.Context, relPath string, body any, timeout time.Duration) ([]byte, error) {
+	base := ensureTrailingSlash(strings.TrimSpace(b.gatewayBaseURL))
 	u, err := url.Parse(base)
 	if err != nil {
 		return nil, fmt.Errorf("gateway_base_url: %w", err)
@@ -79,10 +79,10 @@ func (p *WeixinPlugin) postJSON(ctx context.Context, relPath string, body any, t
 	req.Header.Set("AuthorizationType", "ilink_bot_token")
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(payload)))
 	req.Header.Set("X-WECHAT-UIN", uin)
-	if tok := strings.TrimSpace(p.cfg.Token); tok != "" {
+	if tok := strings.TrimSpace(b.token); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	if rt := strings.TrimSpace(p.cfg.SKRouteTag); rt != "" {
+	if rt := strings.TrimSpace(b.skRouteTag); rt != "" {
 		req.Header.Set("SKRouteTag", rt)
 	}
 
@@ -102,7 +102,7 @@ func (p *WeixinPlugin) postJSON(ctx context.Context, relPath string, body any, t
 	return raw, nil
 }
 
-func (p *WeixinPlugin) getUpdates(ctx context.Context, buf string, timeout time.Duration) (*getUpdatesResp, error) {
+func (b *weixinBot) getUpdates(ctx context.Context, buf string, timeout time.Duration) (*getUpdatesResp, error) {
 	if timeout <= 0 {
 		timeout = defaultLongPollTimeout
 	}
@@ -111,9 +111,9 @@ func (p *WeixinPlugin) getUpdates(ctx context.Context, buf string, timeout time.
 
 	body := getUpdatesReq{
 		GetUpdatesBuf: buf,
-		BaseInfo:      p.buildBaseInfo(),
+		BaseInfo:      b.buildBaseInfo(),
 	}
-	raw, err := p.postJSON(ctx2, "ilink/bot/getupdates", body, timeout)
+	raw, err := b.postJSON(ctx2, "ilink/bot/getupdates", body, timeout)
 	if err != nil {
 		if errors.Is(ctx2.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
 			return &getUpdatesResp{Ret: 0, GetUpdatesBuf: buf}, nil
@@ -130,16 +130,16 @@ func (p *WeixinPlugin) getUpdates(ctx context.Context, buf string, timeout time.
 
 // getConfigAPI calls ilink/bot/getconfig. OpenClaw invokes this per inbound user (with context_token)
 // before replies; some gateways require it for downstream sendmessage delivery to succeed.
-func (p *WeixinPlugin) getConfigAPI(ctx context.Context, peerID, contextToken string) (*getConfigResp, error) {
+func (b *weixinBot) getConfigAPI(ctx context.Context, peerID, contextToken string) (*getConfigResp, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	body := getConfigReq{
 		IlinkUserID:  strings.TrimSpace(peerID),
 		ContextToken: strings.TrimSpace(contextToken),
-		BaseInfo:     p.buildBaseInfo(),
+		BaseInfo:     b.buildBaseInfo(),
 	}
-	raw, err := p.postJSON(ctx, "ilink/bot/getconfig", body, defaultConfigTimeout)
+	raw, err := b.postJSON(ctx, "ilink/bot/getconfig", body, defaultConfigTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -159,10 +159,10 @@ func (p *WeixinPlugin) getConfigAPI(ctx context.Context, peerID, contextToken st
 }
 
 // prefetchOutboundSession runs getconfig for the peer; best-effort (logs on failure, does not block inbound).
-func (p *WeixinPlugin) prefetchOutboundSession(ctx context.Context, peerID, contextToken string) {
+func (b *weixinBot) prefetchOutboundSession(ctx context.Context, peerID, contextToken string) {
 	peerID = strings.TrimSpace(peerID)
 	contextToken = strings.TrimSpace(contextToken)
-	if peerID == "" || contextToken == "" {
+	if b == nil || peerID == "" || contextToken == "" {
 		return
 	}
 	baseCtx := ctx
@@ -171,7 +171,7 @@ func (p *WeixinPlugin) prefetchOutboundSession(ctx context.Context, peerID, cont
 	}
 	cctx, cancel := context.WithTimeout(baseCtx, defaultConfigTimeout)
 	defer cancel()
-	resp, err := p.getConfigAPI(cctx, peerID, contextToken)
+	resp, err := b.getConfigAPI(cctx, peerID, contextToken)
 	if err != nil {
 		log.Printf("weixin: getconfig peer=%q: %v", peerID, err)
 		return
@@ -188,14 +188,14 @@ func (p *WeixinPlugin) prefetchOutboundSession(ctx context.Context, peerID, cont
 		log.Printf("weixin debug: getconfig ok peer=%q typing_ticket_present=%v session_id_present=%v",
 			peerID, strings.TrimSpace(resp.TypingTicket) != "", resp.coalesceOutboundSessionID() != "")
 	}
-	p.rememberTypingTicket(peerID, resp.TypingTicket)
+	b.rememberTypingTicket(peerID, resp.TypingTicket)
 	if sid := resp.coalesceOutboundSessionID(); sid != "" {
-		p.rememberSessionForPeer(peerID, sid)
+		b.rememberSessionForPeer(peerID, sid)
 	}
 }
 
 // sendTypingAPI posts ilink/bot/sendtyping (OpenClaw wraps outbound deliver with typing start/stop).
-func (p *WeixinPlugin) sendTypingAPI(ctx context.Context, peerID, ticket string, status int) error {
+func (b *weixinBot) sendTypingAPI(ctx context.Context, peerID, ticket string, status int) error {
 	peerID = strings.TrimSpace(peerID)
 	ticket = strings.TrimSpace(ticket)
 	if peerID == "" || ticket == "" || status == 0 {
@@ -208,19 +208,19 @@ func (p *WeixinPlugin) sendTypingAPI(ctx context.Context, peerID, ticket string,
 		IlinkUserID:  peerID,
 		TypingTicket: ticket,
 		Status:       status,
-		BaseInfo:     p.buildBaseInfo(),
+		BaseInfo:     b.buildBaseInfo(),
 	}
-	raw, err := p.postJSON(ctx, "ilink/bot/sendtyping", body, defaultConfigTimeout)
+	raw, err := b.postJSON(ctx, "ilink/bot/sendtyping", body, defaultConfigTimeout)
 	if err != nil {
 		return err
 	}
 	return parseIlinkBizError("ilink/bot/sendtyping", raw)
 }
 
-func (p *WeixinPlugin) sendMessageAPI(ctx context.Context, msg *weixinMessage) error {
+func (b *weixinBot) sendMessageAPI(ctx context.Context, msg *weixinMessage) error {
 	body := sendMessageReq{
 		Msg:      msg,
-		BaseInfo: p.buildBaseInfo(),
+		BaseInfo: b.buildBaseInfo(),
 	}
 	if os.Getenv("DMR_WEIXIN_DEBUG_SEND") == "1" {
 		types := make([]int, len(msg.ItemList))
@@ -240,19 +240,19 @@ func (p *WeixinPlugin) sendMessageAPI(ctx context.Context, msg *weixinMessage) e
 	}
 
 	peerID := strings.TrimSpace(msg.ToUserID)
-	ticket := p.typingTicketForPeer(peerID)
+	ticket := b.typingTicketForPeer(peerID)
 	if ticket != "" {
-		if err := p.sendTypingAPI(ctx, peerID, ticket, typingStatusTyping); err != nil && os.Getenv("DMR_WEIXIN_DEBUG_SEND") == "1" {
+		if err := b.sendTypingAPI(ctx, peerID, ticket, typingStatusTyping); err != nil && os.Getenv("DMR_WEIXIN_DEBUG_SEND") == "1" {
 			log.Printf("weixin debug: sendtyping start peer=%q: %v", peerID, err)
 		}
 	}
 
-	raw, err := p.postJSON(ctx, "ilink/bot/sendmessage", body, defaultAPITimeout)
+	raw, err := b.postJSON(ctx, "ilink/bot/sendmessage", body, defaultAPITimeout)
 
 	if ticket != "" {
 		stopCtx := ctx
 		sctx, cancel := context.WithTimeout(stopCtx, defaultConfigTimeout)
-		_ = p.sendTypingAPI(sctx, peerID, ticket, typingStatusCancel)
+		_ = b.sendTypingAPI(sctx, peerID, ticket, typingStatusCancel)
 		cancel()
 	}
 

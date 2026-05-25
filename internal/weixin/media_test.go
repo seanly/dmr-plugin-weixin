@@ -213,17 +213,20 @@ func TestUploadMediaToCdn(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Create a plugin instance with minimal config
-	p := &WeixinPlugin{
-		cfg: WeixinConfig{
-			CDNBaseURL: "https://cdn.example.com/c2c",
-		},
+	// Create minimal bot (no real gateway; exercise pipeline until HTTP fails).
+	p := NewWeixinPlugin()
+	b := &weixinBot{
+		wp:             p,
+		gatewayBaseURL: "http://127.0.0.1:9",
+		token:          "tok",
+		cdnBaseURL:     "https://cdn.example.com/c2c",
+		tokens:         newContextTokenStore(),
 	}
 
 	// Note: This test will fail without a real CDN endpoint
 	// It's mainly to verify the function signature and basic logic
 	ctx := context.Background()
-	_, err := p.uploadMediaToCdn(ctx, testFile, "test_user", UploadMediaTypeImage)
+	_, err := b.uploadMediaToCdn(ctx, testFile, "test_user", UploadMediaTypeImage)
 
 	// We expect an error since we don't have a real gateway
 	if err == nil {

@@ -36,11 +36,15 @@ func sendFileToolParamsJSON() string {
 			},
 			"tape_name": map[string]any{
 				"type":        "string",
-				"description": "For cron/non-inbound runs: weixin:p2p:<user@im.wechat>.",
+				"description": "Cron/off-session: weixin:p2p:<peer> or weixin:<bot_id>:p2p:<peer> when several bots.",
 			},
 			"peer_id": map[string]any{
 				"type":        "string",
-				"description": "Alternative to tape_name: raw Weixin peer id (e.g. x@im.wechat).",
+				"description": "Cron/off-session: raw peer id (requires weixin_bot when multiple bots).",
+			},
+			"weixin_bot": map[string]any{
+				"type":        "string",
+				"description": "Bots[].id; required with peer_id when multiple bots.",
 			},
 		},
 	}
@@ -96,7 +100,7 @@ func parseOutboundKindArg(raw map[string]any, key string) (set bool, kind string
 }
 
 // sendImageMessageWeixin sends an image message
-func (p *WeixinPlugin) sendImageMessageWeixin(ctx context.Context, peerID, contextToken, text string, uploaded *UploadedFileInfo) error {
+func (b *weixinBot) sendImageMessageWeixin(ctx context.Context, peerID, contextToken, text string, uploaded *UploadedFileInfo) error {
 	if contextToken == "" {
 		return fmt.Errorf("contextToken is required")
 	}
@@ -130,15 +134,15 @@ func (p *WeixinPlugin) sendImageMessageWeixin(ctx context.Context, peerID, conte
 		msg := &weixinMessage{
 			FromUserID:   "",
 			ToUserID:     peerID,
-			ClientID:     p.generateClientID(),
+			ClientID:     b.wp.newClientID(),
 			MessageType:  msgTypeBot,
 			MessageState: 2, // FINISH
 			ItemList:     []messageItem{item},
 			ContextToken: contextToken,
-			SessionID:    sessionIDJSON(p.sessionIDForPeer(peerID)),
+			SessionID:    sessionIDJSON(b.sessionIDForPeer(peerID)),
 		}
 
-		if err := p.sendMessageAPI(ctx, msg); err != nil {
+		if err := b.sendMessageAPI(ctx, msg); err != nil {
 			return err
 		}
 	}
@@ -147,7 +151,7 @@ func (p *WeixinPlugin) sendImageMessageWeixin(ctx context.Context, peerID, conte
 }
 
 // sendVideoMessageWeixin sends a video message
-func (p *WeixinPlugin) sendVideoMessageWeixin(ctx context.Context, peerID, contextToken, text string, uploaded *UploadedFileInfo) error {
+func (b *weixinBot) sendVideoMessageWeixin(ctx context.Context, peerID, contextToken, text string, uploaded *UploadedFileInfo) error {
 	if contextToken == "" {
 		return fmt.Errorf("contextToken is required")
 	}
@@ -178,15 +182,15 @@ func (p *WeixinPlugin) sendVideoMessageWeixin(ctx context.Context, peerID, conte
 		msg := &weixinMessage{
 			FromUserID:   "",
 			ToUserID:     peerID,
-			ClientID:     p.generateClientID(),
+			ClientID:     b.wp.newClientID(),
 			MessageType:  msgTypeBot,
 			MessageState: 2,
 			ItemList:     []messageItem{item},
 			ContextToken: contextToken,
-			SessionID:    sessionIDJSON(p.sessionIDForPeer(peerID)),
+			SessionID:    sessionIDJSON(b.sessionIDForPeer(peerID)),
 		}
 
-		if err := p.sendMessageAPI(ctx, msg); err != nil {
+		if err := b.sendMessageAPI(ctx, msg); err != nil {
 			return err
 		}
 	}
@@ -195,7 +199,7 @@ func (p *WeixinPlugin) sendVideoMessageWeixin(ctx context.Context, peerID, conte
 }
 
 // sendFileMessageWeixin sends a file message
-func (p *WeixinPlugin) sendFileMessageWeixin(ctx context.Context, peerID, contextToken, text, fileName string, uploaded *UploadedFileInfo) error {
+func (b *weixinBot) sendFileMessageWeixin(ctx context.Context, peerID, contextToken, text, fileName string, uploaded *UploadedFileInfo) error {
 	if contextToken == "" {
 		return fmt.Errorf("contextToken is required")
 	}
@@ -227,15 +231,15 @@ func (p *WeixinPlugin) sendFileMessageWeixin(ctx context.Context, peerID, contex
 		msg := &weixinMessage{
 			FromUserID:   "",
 			ToUserID:     peerID,
-			ClientID:     p.generateClientID(),
+			ClientID:     b.wp.newClientID(),
 			MessageType:  msgTypeBot,
 			MessageState: 2,
 			ItemList:     []messageItem{item},
 			ContextToken: contextToken,
-			SessionID:    sessionIDJSON(p.sessionIDForPeer(peerID)),
+			SessionID:    sessionIDJSON(b.sessionIDForPeer(peerID)),
 		}
 
-		if err := p.sendMessageAPI(ctx, msg); err != nil {
+		if err := b.sendMessageAPI(ctx, msg); err != nil {
 			return err
 		}
 	}
@@ -245,7 +249,7 @@ func (p *WeixinPlugin) sendFileMessageWeixin(ctx context.Context, peerID, contex
 
 // sendWeixinFilePayload uploads to CDN then sends image, video, or generic file item on Weixin (ilink).
 // The returned string is the resolved kind ("image"|"video"|"file").
-func (p *WeixinPlugin) sendWeixinFilePayload(ctx context.Context, filePath, peerID, contextToken, text, fileKind string) (resolvedKind string, err error) {
+func (b *weixinBot) sendWeixinFilePayload(ctx context.Context, filePath, peerID, contextToken, text, fileKind string) (resolvedKind string, err error) {
 	// Resolve kind when auto
 	if fileKind == "" || fileKind == "auto" {
 		mime := getMimeFromFilename(filePath)
@@ -262,11 +266,11 @@ func (p *WeixinPlugin) sendWeixinFilePayload(ctx context.Context, filePath, peer
 
 	switch fileKind {
 	case "image":
-		uploaded, err = p.uploadImageToWeixin(ctx, filePath, peerID)
+		uploaded, err = b.uploadImageToWeixin(ctx, filePath, peerID)
 	case "video":
-		uploaded, err = p.uploadVideoToWeixin(ctx, filePath, peerID)
+		uploaded, err = b.uploadVideoToWeixin(ctx, filePath, peerID)
 	case "file":
-		uploaded, err = p.uploadFileToWeixin(ctx, filePath, peerID)
+		uploaded, err = b.uploadFileToWeixin(ctx, filePath, peerID)
 	default:
 		return "", fmt.Errorf("unsupported file_type/media_type: %s", fileKind)
 	}
@@ -277,19 +281,19 @@ func (p *WeixinPlugin) sendWeixinFilePayload(ctx context.Context, filePath, peer
 
 	switch fileKind {
 	case "image":
-		return fileKind, p.sendImageMessageWeixin(ctx, peerID, contextToken, text, uploaded)
+		return fileKind, b.sendImageMessageWeixin(ctx, peerID, contextToken, text, uploaded)
 	case "video":
-		return fileKind, p.sendVideoMessageWeixin(ctx, peerID, contextToken, text, uploaded)
+		return fileKind, b.sendVideoMessageWeixin(ctx, peerID, contextToken, text, uploaded)
 	case "file":
 		fileName := filepath.Base(filePath)
-		return fileKind, p.sendFileMessageWeixin(ctx, peerID, contextToken, text, fileName, uploaded)
+		return fileKind, b.sendFileMessageWeixin(ctx, peerID, contextToken, text, fileName, uploaded)
 	}
 
 	return "", nil
 }
 
 // execSendFile executes weixinSendFile.
-func (p *WeixinPlugin) execSendFile(ctx context.Context, argsJSON string, toolCtx map[string]any) (map[string]any, error) {
+func (p *WeixinPlugin) execSendFile(ctx context.Context, argsJSON string, toolCtx map[string]any, sessionTape string) (map[string]any, error) {
 	var raw map[string]any
 	if strings.TrimSpace(argsJSON) == "" {
 		raw = map[string]any{}
@@ -309,8 +313,8 @@ func (p *WeixinPlugin) execSendFile(ctx context.Context, argsJSON string, toolCt
 	}
 	tapeName := argStringTool(raw, "tape_name")
 	peerArg := argStringTool(raw, "peer_id")
+	weiBotArg := argStringTool(raw, "weixin_bot")
 
-	// Handle remote URLs
 	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
 		tempDir := "/tmp/dmr-weixin-files"
 		localPath, err := downloadRemoteFile(ctx, filePath, tempDir)
@@ -328,6 +332,7 @@ func (p *WeixinPlugin) execSendFile(ctx context.Context, argsJSON string, toolCt
 	ctxPeerID, _ := toolCtx["peer_id"].(string)
 	ctxToken, _ := toolCtx["context_token"].(string)
 	var peerID, contextToken string
+	var bot *weixinBot
 
 	if ctxPeerID != "" {
 		if tapeName != "" || peerArg != "" {
@@ -335,40 +340,51 @@ func (p *WeixinPlugin) execSendFile(ctx context.Context, argsJSON string, toolCt
 		}
 		peerID = ctxPeerID
 		contextToken = strings.TrimSpace(ctxToken)
+		var err error
+		bot, err = p.botForToolContext(toolCtx, sessionTape)
+		if err != nil {
+			return nil, err
+		}
 		if contextToken == "" {
-			contextToken = p.tokens.get(peerID)
+			contextToken = bot.tokens.get(peerID)
 		}
 	} else {
 		if tapeName != "" && peerArg != "" {
 			return nil, fmt.Errorf("provide at most one of tape_name or peer_id")
 		}
+		var botLabelHint string
 		switch {
 		case tapeName != "":
-			id, err := weixinP2PTapeToPeerID(tapeName)
-			if err != nil {
-				return nil, err
+			pid, lbl, ok := parseWeixinP2PTape(tapeName)
+			if !ok {
+				return nil, fmt.Errorf("invalid tape_name %q (expected weixin:p2p:<peer> or weixin:<bot_id>:p2p:<peer>)", tapeName)
 			}
-			peerID = id
+			peerID = pid
+			botLabelHint = lbl
 		case peerArg != "":
 			peerID = peerArg
+			botLabelHint = weiBotArg
+			if p.multiBot() && strings.TrimSpace(botLabelHint) == "" {
+				return nil, fmt.Errorf("weixinSendFile requires weixin_bot when peer_id is used and multiple bots are configured")
+			}
 		default:
 			return nil, fmt.Errorf("weixinSendFile requires tape_name or peer_id when not in a Weixin-triggered job")
 		}
-		contextToken = p.tokens.get(peerID)
+		var err error
+		bot, err = p.botByTapeLabel(botLabelHint)
+		if err != nil {
+			return nil, err
+		}
+		contextToken = bot.tokens.get(peerID)
 		if contextToken == "" {
-			return nil, fmt.Errorf("no cached context_token for peer %q; user must message the bot first", peerID)
+			return nil, fmt.Errorf("no cached context_token for peer %q; user must message this bot first", peerID)
 		}
 	}
 
-	resolved, err := p.sendWeixinFilePayload(ctx, filePath, peerID, contextToken, text, fileKind)
+	resolved, err := bot.sendWeixinFilePayload(ctx, filePath, peerID, contextToken, text, fileKind)
 	if err != nil {
 		return nil, err
 	}
 
 	return map[string]any{"ok": true, "peer_id": peerID, "file_type": resolved}, nil
-}
-
-// generateClientID generates a unique client ID for messages
-func (p *WeixinPlugin) generateClientID() string {
-	return p.newClientID()
 }

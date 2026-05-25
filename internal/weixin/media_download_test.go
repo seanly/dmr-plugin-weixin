@@ -10,8 +10,9 @@ import (
 func TestWriteMediaFile_PathFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	p := &WeixinPlugin{cfg: WeixinConfig{Workspace: tmpDir}}
+	b := &weixinBot{wp: p}
 
-	path, err := p.writeMediaFile([]byte("test data"), "", ".jpg")
+	path, err := b.writeMediaFile([]byte("test data"), "", ".jpg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +34,9 @@ func TestWriteMediaFile_PathFormat(t *testing.T) {
 func TestWriteMediaFile_WithFileName(t *testing.T) {
 	tmpDir := t.TempDir()
 	p := &WeixinPlugin{cfg: WeixinConfig{Workspace: tmpDir}}
+	b := &weixinBot{wp: p}
 
-	path, err := p.writeMediaFile([]byte("pdf content"), "report.pdf", ".pdf")
+	path, err := b.writeMediaFile([]byte("pdf content"), "report.pdf", ".pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +48,9 @@ func TestWriteMediaFile_WithFileName(t *testing.T) {
 
 func TestWriteMediaFile_FallbackWorkspace(t *testing.T) {
 	p := &WeixinPlugin{cfg: WeixinConfig{Workspace: ""}}
+	b := &weixinBot{wp: p}
 
-	path, err := p.writeMediaFile([]byte("data"), "", ".png")
+	path, err := b.writeMediaFile([]byte("data"), "", ".png")
 	if err != nil {
 		t.Fatal(err)
 	}

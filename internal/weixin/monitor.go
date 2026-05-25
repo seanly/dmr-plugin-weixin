@@ -15,8 +15,11 @@ const (
 	sessionPauseDuration     = time.Hour
 )
 
-func (p *WeixinPlugin) monitorLoop(ctx context.Context) {
-	buf := p.loadSyncBuf()
+func (p *WeixinPlugin) monitorLoop(ctx context.Context, bot *weixinBot) {
+	if bot == nil {
+		return
+	}
+	buf := bot.loadSyncBuf()
 	nextTimeout := time.Duration(defaultLongPollTimeoutMS) * time.Millisecond
 	consecutive := 0
 	var pauseUntil time.Time
@@ -44,7 +47,7 @@ func (p *WeixinPlugin) monitorLoop(ctx context.Context) {
 		}
 
 		pollCtx, cancel := context.WithTimeout(ctx, nextTimeout)
-		resp, err := p.getUpdates(pollCtx, buf, nextTimeout)
+		resp, err := bot.getUpdates(pollCtx, buf, nextTimeout)
 		cancel()
 
 		if err != nil {
@@ -102,17 +105,17 @@ func (p *WeixinPlugin) monitorLoop(ctx context.Context) {
 			nextTimeout = time.Duration(resp.LongpollingTimeoutMs) * time.Millisecond
 		}
 		if resp.GetUpdatesBuf != "" {
-			p.saveSyncBuf(resp.GetUpdatesBuf)
+			bot.saveSyncBuf(resp.GetUpdatesBuf)
 			buf = resp.GetUpdatesBuf
 		}
 
 		for _, full := range resp.Msgs {
-			p.handleInboundMessage(ctx, full)
+			p.handleInboundMessage(ctx, bot, full)
 		}
 	}
 }
 
-func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMessage) {
+func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, bot *weixinBot, full weixinMessage) {
 	if strings.TrimSpace(full.GroupID) != "" {
 		log.Printf("weixin: skip group message group_id=%q", full.GroupID)
 		return
@@ -125,15 +128,15 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 		return
 	}
 	if tok := full.inboundContextToken(); tok != "" {
-		p.tokens.set(peerID, tok)
-		p.prefetchOutboundSession(ctx, peerID, tok)
+		bot.tokens.set(peerID, tok)
+		bot.prefetchOutboundSession(ctx, peerID, tok)
 	}
 	if sid := full.inboundSessionID(); sid != "" {
-		p.rememberSessionForPeer(peerID, sid)
+		bot.rememberSessionForPeer(peerID, sid)
 	}
 
 	dkey := dedupKeyForMessage(full)
-	if dkey != "" && p.dedup != nil && p.dedup.isDuplicate(dkey) {
+	if dkey != "" && p.dedup != nil && p.dedup.isDuplicate(dedupScopedKey(bot, dkey, p.multiBot())) {
 		log.Printf("weixin: dedup skip %s peer=%q", dkey, peerID)
 		return
 	}
@@ -147,7 +150,7 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 		if !isMediaItemType(item.Type) {
 			continue
 		}
-		att, err := p.saveInboundMedia(ctx, item)
+		att, err := bot.saveInboundMedia(ctx, item)
 		if err != nil {
 			log.Printf("weixin: save media type=%d peer=%q: %v", item.Type, peerID, err)
 			continue
@@ -181,7 +184,7 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 
 		// Official approach: if ref message_item is media, download it directly.
 		if isMediaItemType(ri.Type) {
-			att, err := p.saveInboundMedia(ctx, *ri)
+			att, err := bot.saveInboundMedia(ctx, *ri)
 			if err != nil {
 				log.Printf("weixin: ref media download failed type=%d peer=%q: %v", ri.Type, peerID, err)
 			} else if att != nil {
@@ -195,7 +198,7 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	// Pure media message (no text, no ref) → save only, do not send to model.
 	if strings.TrimSpace(body) == "" && !hasRef {
 		if len(directAttachments) > 0 {
-			p.setRecentMedia(peerID, directAttachments)
+			bot.setRecentMedia(peerID, directAttachments)
 			log.Printf("weixin: saved %d media file(s) for peer=%q (no model run)", len(directAttachments), peerID)
 		}
 		return
@@ -204,7 +207,7 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 	// If ref_msg was present but carried no usable media/text data, fall back
 	// to the most recently saved media for this peer.
 	if hasRef && len(refAttachments) == 0 && refTextContent == "" {
-		if recent := p.popRecentMedia(peerID); len(recent) > 0 {
+		if recent := bot.popRecentMedia(peerID); len(recent) > 0 {
 			refAttachments = recent
 			log.Printf("weixin: ref_msg empty, using %d recent media file(s) for peer=%q", len(recent), peerID)
 		}
@@ -214,22 +217,23 @@ func (p *WeixinPlugin) handleInboundMessage(ctx context.Context, full weixinMess
 		body = "[empty or non-text message]"
 	}
 
-	if p.approver != nil && p.approver.tryResolveP2P(peerID, body) {
+	if p.approver != nil && p.approver.tryResolveApproval(bot, peerID, body) {
 		log.Printf("weixin: approval reply consumed peer=%q", peerID)
 		return
 	}
 
-	if !isAllowedSender(p.cfg.AllowFrom, peerID) {
+	if !isAllowedSender(bot.allowFrom, peerID) {
 		log.Printf("weixin: sender not allowed peer=%q", peerID)
 		return
 	}
 
-	tape := tapeNameForP2P(peerID)
+	tape := p.tapeForPeer(peerID, bot)
 	jobSid := strings.TrimSpace(full.inboundSessionID())
 	if jobSid == "" {
-		jobSid = strings.TrimSpace(p.sessionIDForPeer(peerID))
+		jobSid = strings.TrimSpace(bot.sessionIDForPeer(peerID))
 	}
 	job := &inboundJob{
+		Bot:             bot,
 		QueueKey:        tape,
 		TapeName:        tape,
 		PeerID:          peerID,

@@ -6,11 +6,17 @@ import (
 	"strings"
 )
 
-func (p *WeixinPlugin) syncBufPath() string {
-	base := strings.TrimSpace(p.cfg.ConfigBaseDir)
-	acc := strings.TrimSpace(p.cfg.AccountID)
-	if acc == "" {
-		acc = "default"
+func (b *weixinBot) syncBufPath() string {
+	base := ""
+	if b != nil && b.wp != nil {
+		base = strings.TrimSpace(b.wp.cfg.ConfigBaseDir)
+	}
+	acc := "default"
+	if b != nil {
+		acc = strings.TrimSpace(b.accountID)
+		if acc == "" {
+			acc = "default"
+		}
 	}
 	name := "weixin_" + acc + "_get_updates_buf.txt"
 	if base != "" {
@@ -24,20 +30,20 @@ func (p *WeixinPlugin) syncBufPath() string {
 	return filepath.Join(dir, "dmr-weixin", name)
 }
 
-func (p *WeixinPlugin) loadSyncBuf() string {
-	path := p.syncBufPath()
-	b, err := os.ReadFile(path)
+func (b *weixinBot) loadSyncBuf() string {
+	path := b.syncBufPath()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	return string(b)
+	return string(raw)
 }
 
-func (p *WeixinPlugin) saveSyncBuf(buf string) {
+func (b *weixinBot) saveSyncBuf(buf string) {
 	if buf == "" {
 		return
 	}
-	path := p.syncBufPath()
+	path := b.syncBufPath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return

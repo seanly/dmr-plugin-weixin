@@ -7,23 +7,6 @@ import (
 	"strings"
 )
 
-const weixinP2PTapePrefix = "weixin:p2p:"
-
-func weixinP2PTapeToPeerID(tapeName string) (string, error) {
-	s := strings.TrimSpace(tapeName)
-	if s == "" {
-		return "", fmt.Errorf("tape_name is empty")
-	}
-	if !strings.HasPrefix(s, weixinP2PTapePrefix) {
-		return "", fmt.Errorf("tape_name must start with %q", weixinP2PTapePrefix)
-	}
-	id := strings.TrimSpace(s[len(weixinP2PTapePrefix):])
-	if id == "" {
-		return "", fmt.Errorf("empty peer id in tape_name")
-	}
-	return id, nil
-}
-
 func sendTextToolParamsJSON() string {
 	schema := map[string]any{
 		"type":     "object",
@@ -39,11 +22,15 @@ func sendTextToolParamsJSON() string {
 			},
 			"tape_name": map[string]any{
 				"type":        "string",
-				"description": "For cron/non-inbound runs: weixin:p2p:<user@im.wechat>.",
+				"description": "Cron/off-session: weixin:p2p:<peer> or weixin:<bot_id>:p2p:<peer> when several bots.",
 			},
 			"peer_id": map[string]any{
 				"type":        "string",
-				"description": "Alternative to tape_name: raw Weixin peer id (e.g. x@im.wechat).",
+				"description": "Cron/off-session: raw peer id (requires weixin_bot when multiple bots configured).",
+			},
+			"weixin_bot": map[string]any{
+				"type":        "string",
+				"description": "Bots[].id from config.toml; required with peer_id when multiple bots; optional otherwise.",
 			},
 		},
 	}
@@ -64,7 +51,7 @@ func argStringTool(m map[string]any, key string) string {
 	}
 }
 
-func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string, toolCtx map[string]any) (map[string]any, error) {
+func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string, toolCtx map[string]any, sessionTape string) (map[string]any, error) {
 	var raw map[string]any
 	if strings.TrimSpace(argsJSON) == "" {
 		raw = map[string]any{}
@@ -77,48 +64,62 @@ func (p *WeixinPlugin) execSendText(ctx context.Context, argsJSON string, toolCt
 	}
 	tapeName := argStringTool(raw, "tape_name")
 	peerArg := argStringTool(raw, "peer_id")
+	weiBotArg := argStringTool(raw, "weixin_bot")
 
-	// First, try to get peer_id and context_token from tool context (passed from RunAgent)
 	ctxPeerID, _ := toolCtx["peer_id"].(string)
 	ctxToken, _ := toolCtx["context_token"].(string)
 
-	// If we have context from RunAgent, use it
 	if ctxPeerID != "" {
 		if tapeName != "" || peerArg != "" {
 			return nil, fmt.Errorf("do not set tape_name or peer_id during a Weixin-triggered RunAgent")
 		}
+		bot, err := p.botForToolContext(toolCtx, sessionTape)
+		if err != nil {
+			return nil, err
+		}
 		tok := strings.TrimSpace(ctxToken)
 		if tok == "" {
-			tok = p.tokens.get(ctxPeerID)
+			tok = bot.tokens.get(ctxPeerID)
 		}
-		if err := p.sendTextToPeer(ctx, ctxPeerID, tok, text, false); err != nil {
+		if err := bot.sendTextToPeer(ctx, ctxPeerID, tok, text, false); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "peer_id": ctxPeerID}, nil
 	}
 
-	// No context from RunAgent, use explicit tape_name or peer_id
 	if tapeName != "" && peerArg != "" {
 		return nil, fmt.Errorf("provide at most one of tape_name or peer_id")
 	}
 	var peerID string
+	var botLabelHint string
+
 	switch {
 	case tapeName != "":
-		id, err := weixinP2PTapeToPeerID(tapeName)
-		if err != nil {
-			return nil, err
+		pid, lbl, ok := parseWeixinP2PTape(tapeName)
+		if !ok {
+			return nil, fmt.Errorf("invalid tape_name %q (expected weixin:p2p:<peer> or weixin:<bot_id>:p2p:<peer>)", tapeName)
 		}
-		peerID = id
+		peerID = pid
+		botLabelHint = lbl
 	case peerArg != "":
 		peerID = peerArg
+		botLabelHint = weiBotArg
+		if p.multiBot() && strings.TrimSpace(botLabelHint) == "" {
+			return nil, fmt.Errorf("weixinSendText requires weixin_bot argument when peer_id is used and multiple bots are configured")
+		}
 	default:
 		return nil, fmt.Errorf("weixinSendText requires tape_name or peer_id when not in a Weixin-triggered job")
 	}
-	tok := p.tokens.get(peerID)
-	if tok == "" {
-		return nil, fmt.Errorf("no cached context_token for peer %q; user must message the bot first", peerID)
+
+	bot, err := p.botByTapeLabel(botLabelHint)
+	if err != nil {
+		return nil, err
 	}
-	if err := p.sendTextToPeer(ctx, peerID, tok, text, false); err != nil {
+	tok := bot.tokens.get(peerID)
+	if tok == "" {
+		return nil, fmt.Errorf("no cached context_token for peer %q; user must message this bot first", peerID)
+	}
+	if err := bot.sendTextToPeer(ctx, peerID, tok, text, false); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true, "peer_id": peerID}, nil

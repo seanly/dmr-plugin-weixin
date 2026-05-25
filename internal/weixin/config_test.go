@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestMergeWeixinCredentials(t *testing.T) {
+func TestMergeWeixinCredentialsBot(t *testing.T) {
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, "c.json")
 	if err := os.WriteFile(credPath, []byte(`{
@@ -16,17 +16,28 @@ func TestMergeWeixinCredentials(t *testing.T) {
 }`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := WeixinConfig{
-		ConfigBaseDir:   dir,
-		GatewayBaseURL:  "https://yaml-gw",
-		CDNBaseURL:      "https://yaml-cdn",
-		Token:           "yaml-token",
-		CredentialsPath: "c.json",
+	bot := WeixinBotConfig{
+		GatewayBaseURL:   "https://yaml-gw",
+		CDNBaseURL:       "https://yaml-cdn",
+		Token:            "yaml-token",
+		CredentialsPath:  "c.json",
 	}
-	if err := mergeWeixinCredentials(&cfg); err != nil {
+	if err := mergeWeixinCredentialsBot(&bot, dir); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GatewayBaseURL != "https://gw.from.file" || cfg.CDNBaseURL != "https://cdn.from.file" || cfg.Token != "secret-from-file" {
-		t.Fatalf("%+v", cfg)
+	if bot.GatewayBaseURL != "https://gw.from.file" || bot.CDNBaseURL != "https://cdn.from.file" || bot.Token != "secret-from-file" {
+		t.Fatalf("%+v", bot)
+	}
+
+	credWithAcct := filepath.Join(dir, "with_acct.json")
+	if err := os.WriteFile(credWithAcct, []byte(`{"gateway_base_url":"https://g","cdn_base_url":"https://c","token":"t","account_id":"acct2"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bot2 := WeixinBotConfig{AccountID: "yaml-default", CredentialsPath: "with_acct.json"}
+	if err := mergeWeixinCredentialsBot(&bot2, dir); err != nil {
+		t.Fatal(err)
+	}
+	if bot2.AccountID != "acct2" || bot2.GatewayBaseURL != "https://g" {
+		t.Fatalf("%+v", bot2)
 	}
 }

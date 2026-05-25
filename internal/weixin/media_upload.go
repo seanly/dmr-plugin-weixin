@@ -16,7 +16,7 @@ import (
 )
 
 // uploadMediaToCdn is the common upload pipeline for all media types
-func (p *WeixinPlugin) uploadMediaToCdn(ctx context.Context, filePath, toUserID string, mediaType int) (*UploadedFileInfo, error) {
+func (b *weixinBot) uploadMediaToCdn(ctx context.Context, filePath, toUserID string, mediaType int) (*UploadedFileInfo, error) {
 	// Read file
 	plaintext, err := os.ReadFile(filePath)
 	if err != nil {
@@ -55,10 +55,10 @@ func (p *WeixinPlugin) uploadMediaToCdn(ctx context.Context, filePath, toUserID 
 		Filesize:    filesize,
 		NoNeedThumb: true,
 		AesKey:      hex.EncodeToString(aesKey),
-		BaseInfo:    p.buildBaseInfo(),
+		BaseInfo:    b.buildBaseInfo(),
 	}
 
-	raw, err := p.postJSON(ctx, "ilink/bot/getuploadurl", uploadReq, defaultAPITimeout)
+	raw, err := b.postJSON(ctx, "ilink/bot/getuploadurl", uploadReq, defaultAPITimeout)
 	if err != nil {
 		return nil, fmt.Errorf("getuploadurl: %w", err)
 	}
@@ -73,7 +73,7 @@ func (p *WeixinPlugin) uploadMediaToCdn(ctx context.Context, filePath, toUserID 
 	}
 
 	// Upload to CDN (upload_full_url from gateway takes precedence over client-built URL — openclaw-weixin parity)
-	downloadParam, err := p.uploadBufferToCdn(ctx, plaintext, strings.TrimSpace(uploadResp.UploadFullURL), strings.TrimSpace(uploadResp.UploadParam), filekey, aesKey)
+	downloadParam, err := b.uploadBufferToCdn(ctx, plaintext, strings.TrimSpace(uploadResp.UploadFullURL), strings.TrimSpace(uploadResp.UploadParam), filekey, aesKey)
 	if err != nil {
 		return nil, fmt.Errorf("cdn upload: %w", err)
 	}
@@ -88,18 +88,18 @@ func (p *WeixinPlugin) uploadMediaToCdn(ctx context.Context, filePath, toUserID 
 }
 
 // uploadImageToWeixin uploads an image file
-func (p *WeixinPlugin) uploadImageToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
-	return p.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeImage)
+func (b *weixinBot) uploadImageToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
+	return b.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeImage)
 }
 
 // uploadVideoToWeixin uploads a video file
-func (p *WeixinPlugin) uploadVideoToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
-	return p.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeVideo)
+func (b *weixinBot) uploadVideoToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
+	return b.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeVideo)
 }
 
 // uploadFileToWeixin uploads a generic file attachment
-func (p *WeixinPlugin) uploadFileToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
-	return p.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeFile)
+func (b *weixinBot) uploadFileToWeixin(ctx context.Context, filePath, toUserID string) (*UploadedFileInfo, error) {
+	return b.uploadMediaToCdn(ctx, filePath, toUserID, UploadMediaTypeFile)
 }
 
 // getMimeFromFilename returns MIME type based on file extension

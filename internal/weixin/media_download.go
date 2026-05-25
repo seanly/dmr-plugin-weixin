@@ -20,7 +20,7 @@ type InboundAttachment struct {
 }
 
 // saveInboundMedia downloads and saves a media item to workspace/weixin/{date}/.
-func (p *WeixinPlugin) saveInboundMedia(ctx context.Context, item messageItem) (*InboundAttachment, error) {
+func (b *weixinBot) saveInboundMedia(ctx context.Context, item messageItem) (*InboundAttachment, error) {
 	media, typeName, fileName, ext := extractMediaInfo(item)
 	if media == nil {
 		return nil, fmt.Errorf("no media in item type %d", item.Type)
@@ -29,7 +29,7 @@ func (p *WeixinPlugin) saveInboundMedia(ctx context.Context, item messageItem) (
 		return nil, fmt.Errorf("missing cdn params for %s", typeName)
 	}
 
-	cdnBase := strings.TrimSpace(p.cfg.CDNBaseURL)
+	cdnBase := strings.TrimSpace(b.cdnBaseURL)
 	if cdnBase == "" {
 		return nil, fmt.Errorf("cdn_base_url not configured")
 	}
@@ -39,7 +39,7 @@ func (p *WeixinPlugin) saveInboundMedia(ctx context.Context, item messageItem) (
 		return nil, fmt.Errorf("download %s: %w", typeName, err)
 	}
 
-	savePath, err := p.writeMediaFile(plaintext, fileName, ext)
+	savePath, err := b.writeMediaFile(plaintext, fileName, ext)
 	if err != nil {
 		return nil, fmt.Errorf("save %s: %w", typeName, err)
 	}
@@ -92,8 +92,11 @@ func extractMediaInfo(item messageItem) (media *cdnMedia, typeName, fileName, ex
 }
 
 // writeMediaFile saves plaintext bytes to workspace/weixin/{date}/{ts}-{rand}.{ext}.
-func (p *WeixinPlugin) writeMediaFile(data []byte, fileName, ext string) (string, error) {
-	ws := strings.TrimSpace(p.cfg.Workspace)
+func (b *weixinBot) writeMediaFile(data []byte, fileName, ext string) (string, error) {
+	ws := ""
+	if b != nil && b.wp != nil {
+		ws = strings.TrimSpace(b.wp.cfg.Workspace)
+	}
 	if ws == "" {
 		ws = "/tmp/dmr-weixin-media"
 	}
@@ -129,31 +132,32 @@ func sanitizeFileName(name string) string {
 	return name
 }
 
-// setRecentMedia appends saved attachments for a peer (accumulates across
-// multiple direct media messages). Capped at 20 entries to bound memory.
-func (p *WeixinPlugin) setRecentMedia(peerID string, atts []InboundAttachment) {
-	if len(atts) == 0 {
+func (b *weixinBot) setRecentMedia(peerID string, atts []InboundAttachment) {
+	if len(atts) == 0 || b == nil {
 		return
 	}
-	p.recentMediaMu.Lock()
-	defer p.recentMediaMu.Unlock()
-	if p.recentMediaByPeer == nil {
-		p.recentMediaByPeer = make(map[string][]InboundAttachment)
+	b.recentMediaMu.Lock()
+	defer b.recentMediaMu.Unlock()
+	if b.recentMediaByPeer == nil {
+		b.recentMediaByPeer = make(map[string][]InboundAttachment)
 	}
-	existing := p.recentMediaByPeer[peerID]
+	existing := b.recentMediaByPeer[peerID]
 	existing = append(existing, atts...)
 	const maxRecent = 20
 	if len(existing) > maxRecent {
 		existing = existing[len(existing)-maxRecent:]
 	}
-	p.recentMediaByPeer[peerID] = existing
+	b.recentMediaByPeer[peerID] = existing
 }
 
 // popRecentMedia retrieves and clears all saved attachments for a peer.
-func (p *WeixinPlugin) popRecentMedia(peerID string) []InboundAttachment {
-	p.recentMediaMu.Lock()
-	defer p.recentMediaMu.Unlock()
-	atts := p.recentMediaByPeer[peerID]
-	delete(p.recentMediaByPeer, peerID)
+func (b *weixinBot) popRecentMedia(peerID string) []InboundAttachment {
+	if b == nil {
+		return nil
+	}
+	b.recentMediaMu.Lock()
+	defer b.recentMediaMu.Unlock()
+	atts := b.recentMediaByPeer[peerID]
+	delete(b.recentMediaByPeer, peerID)
 	return atts
 }

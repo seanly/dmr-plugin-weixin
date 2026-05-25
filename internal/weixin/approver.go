@@ -162,9 +162,10 @@ func parseApprovalIndices(input string, total int) ([]int32, error) {
 	return indices, nil
 }
 
-func (a *WeixinApprover) tryResolveP2P(peerID, content string) bool {
+func (a *WeixinApprover) tryResolveApproval(bot *weixinBot, peerID, content string) bool {
+	key := approvalWaitKey(bot, peerID)
 	a.mu.Lock()
-	entry := a.wait[peerID]
+	entry := a.wait[key]
 	a.mu.Unlock()
 	if entry == nil {
 		return false
@@ -190,27 +191,22 @@ func (a *WeixinApprover) tryResolveP2P(peerID, content string) bool {
 	return true
 }
 
-func (a *WeixinApprover) resolveContextToken(peerID string) string {
-	// Get context token from the token store
-	// The token store is updated whenever we receive an inbound message
-	return a.plugin.tokens.get(peerID)
-}
-
-func (a *WeixinApprover) waitApproval(peerID, prompt string, batchN int) approvalReply {
+func (a *WeixinApprover) waitApproval(bot *weixinBot, peerID, prompt string, batchN int) approvalReply {
 	timeout := a.plugin.cfg.approvalTimeout()
 	ch := make(chan approvalReply, 1)
+	key := approvalWaitKey(bot, peerID)
 
 	a.mu.Lock()
-	if _, busy := a.wait[peerID]; busy {
+	if _, busy := a.wait[key]; busy {
 		a.mu.Unlock()
 		return approvalReply{choice: choiceDenied}
 	}
-	a.wait[peerID] = &approvalWait{ch: ch, batchN: batchN}
+	a.wait[key] = &approvalWait{ch: ch, batchN: batchN}
 	a.mu.Unlock()
 
 	defer func() {
 		a.mu.Lock()
-		delete(a.wait, peerID)
+		delete(a.wait, key)
 		a.mu.Unlock()
 	}()
 
@@ -218,12 +214,18 @@ func (a *WeixinApprover) waitApproval(peerID, prompt string, batchN int) approva
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tok := a.resolveContextToken(peerID)
+	var tok string
+	if bot != nil {
+		tok = bot.tokens.get(peerID)
+	}
 	if tok == "" {
 		log.Printf("weixin: approver no context_token for peer=%q", peerID)
 		return approvalReply{choice: choiceDenied}
 	}
-	if err := a.plugin.sendApprovalText(ctx, peerID, tok, prompt); err != nil {
+	if bot == nil {
+		return approvalReply{choice: choiceDenied}
+	}
+	if err := bot.sendApprovalText(ctx, peerID, tok, prompt); err != nil {
 		log.Printf("weixin: approval send failed: %v", err)
 		return approvalReply{choice: choiceDenied}
 	}
@@ -327,15 +329,21 @@ func formatRemainingJSONMarkdown(args map[string]any, restJSONMaxRunes int) stri
 func (a *WeixinApprover) handleSingle(req *proto.ApprovalRequest, resp *proto.ApprovalResult) {
 	tape := strings.TrimSpace(req.Tape)
 	log.Printf("weixin: approver single tape=%q tool=%q", tape, req.Tool)
-	if !strings.HasPrefix(tape, "weixin:p2p:") {
+	if !strings.HasPrefix(tape, "weixin:") {
 		resp.Choice = choiceDenied
-		resp.Comment = "approvals only supported for Weixin private chat (weixin:p2p:*)"
+		resp.Comment = "approvals only supported on Weixin private chat tapes"
 		return
 	}
-	peerID, ok := p2pPeerFromTape(tape)
-	if !ok {
+	peerID, botLabel, ok := parseWeixinP2PTape(tape)
+	if !ok || peerID == "" {
 		resp.Choice = choiceDenied
 		resp.Comment = "unknown tape routing for approval"
+		return
+	}
+	wxbot, err := a.plugin.botByTapeLabel(botLabel)
+	if err != nil {
+		resp.Choice = choiceDenied
+		resp.Comment = err.Error()
 		return
 	}
 	argsStr := strings.TrimSpace(req.ArgsJSON)
@@ -367,7 +375,7 @@ func (a *WeixinApprover) handleSingle(req *proto.ApprovalRequest, resp *proto.Ap
 	b.WriteString("- Example: `y // looks safe`\n")
 
 	body := b.String()
-	reply := a.waitApproval(peerID, body, 0)
+	reply := a.waitApproval(wxbot, peerID, body, 0)
 	resp.Choice = reply.choice
 	resp.Comment = reply.comment
 	if resp.Choice == choiceDenied && resp.Comment == "" {
@@ -387,12 +395,17 @@ func (a *WeixinApprover) handleBatch(req *proto.BatchApprovalRequest, resp *prot
 			return
 		}
 	}
-	if !strings.HasPrefix(tape, "weixin:p2p:") {
+	if !strings.HasPrefix(tape, "weixin:") {
 		resp.Choice = choiceDenied
 		return
 	}
-	peerID, ok := p2pPeerFromTape(tape)
-	if !ok {
+	peerID, botLabel, ok := parseWeixinP2PTape(tape)
+	if !ok || peerID == "" {
+		resp.Choice = choiceDenied
+		return
+	}
+	wxbot, err := a.plugin.botByTapeLabel(botLabel)
+	if err != nil {
 		resp.Choice = choiceDenied
 		return
 	}
@@ -433,7 +446,7 @@ func (a *WeixinApprover) handleBatch(req *proto.BatchApprovalRequest, resp *prot
 	b.WriteString("- Example: `n // security concern`\n")
 	b.WriteString("- Example: `1,3 // approved, others look risky`\n")
 
-	reply := a.waitApproval(peerID, b.String(), n)
+	reply := a.waitApproval(wxbot, peerID, b.String(), n)
 	resp.Choice = reply.choice
 	resp.Comment = reply.comment
 	if reply.indices != nil {

@@ -82,7 +82,7 @@ func aesEcbPaddedSize(plaintextSize int64) int64 {
 
 // uploadBufferToCdn uploads ciphertext to Weixin CDN (openclaw-weixin parity).
 // If uploadFullURL is non-empty (from getuploadurl.upload_full_url), it is POSTed directly; otherwise the URL is built from cdn_base_url + upload_param + filekey.
-func (p *WeixinPlugin) uploadBufferToCdn(ctx context.Context, buf []byte, uploadFullURL, uploadParam, filekey string, aesKey []byte) (string, error) {
+func (b *weixinBot) uploadBufferToCdn(ctx context.Context, buf []byte, uploadFullURL, uploadParam, filekey string, aesKey []byte) (string, error) {
 	uploadFullURL = strings.TrimSpace(uploadFullURL)
 	uploadParam = strings.TrimSpace(uploadParam)
 
@@ -96,7 +96,7 @@ func (p *WeixinPlugin) uploadBufferToCdn(ctx context.Context, buf []byte, upload
 	if uploadFullURL != "" {
 		cdnURL = uploadFullURL
 	} else if uploadParam != "" {
-		base := strings.TrimSpace(p.cfg.CDNBaseURL)
+		base := strings.TrimSpace(b.cdnBaseURL)
 		if base == "" {
 			return "", fmt.Errorf("cdn_base_url not configured (getuploadurl did not return upload_full_url)")
 		}

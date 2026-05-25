@@ -29,7 +29,6 @@ func truncateRunes(s string, maxRunes int) string {
 // markdownToPlainText is a lightweight strip (Weixin has no rich post like Feishu).
 func markdownToPlainText(text string) string {
 	s := text
-	// code blocks: keep inner content roughly
 	for {
 		start := strings.Index(s, "```")
 		if start < 0 {
@@ -59,30 +58,31 @@ func (p *WeixinPlugin) newClientID() string {
 	return "dmr-wx-" + hex.EncodeToString(b[:])
 }
 
-func (p *WeixinPlugin) sendBotMessage(ctx context.Context, peerID, contextToken string, items []messageItem) error {
+func (b *weixinBot) sendBotMessage(ctx context.Context, peerID, contextToken string, items []messageItem) error {
+	if b == nil {
+		return fmt.Errorf("nil bot")
+	}
 	if strings.TrimSpace(contextToken) == "" {
 		return fmt.Errorf("contextToken is required")
 	}
 	msg := &weixinMessage{
 		ToUserID:        peerID,
-		ClientID:        p.newClientID(),
+		ClientID:        b.wp.newClientID(),
 		MessageType:     msgTypeBot,
 		MessageState:    2, // FINISH
 		ItemList:        items,
 		ContextToken:    contextToken,
 		ContextTokCamel: contextToken,
 	}
-	// Get session ID from the session store
-	// The store is updated when we receive inbound messages
-	sid := p.sessionIDForPeer(peerID)
+	sid := b.sessionIDForPeer(peerID)
 	if sid != "" {
 		msg.SessionID = sessionIDJSON(sid)
 	}
-	return p.sendMessageAPI(ctx, msg)
+	return b.sendMessageAPI(ctx, msg)
 }
 
-func (p *WeixinPlugin) sendPlainTextChunks(ctx context.Context, peerID, contextToken, text string) error {
-	text = markdownToPlainText(truncateRunes(text, maxWeixinChunkRunes*20)) // allow long reply split
+func (b *weixinBot) sendPlainTextChunks(ctx context.Context, peerID, contextToken, text string) error {
+	text = markdownToPlainText(truncateRunes(text, maxWeixinChunkRunes*20))
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -93,7 +93,7 @@ func (p *WeixinPlugin) sendPlainTextChunks(ctx context.Context, peerID, contextT
 			end = len(runes)
 		}
 		chunk := string(runes[i:end])
-		if err := p.sendBotMessage(ctx, peerID, contextToken, []messageItem{
+		if err := b.sendBotMessage(ctx, peerID, contextToken, []messageItem{
 			{Type: itemTypeText, TextItem: &textItem{Text: chunk}},
 		}); err != nil {
 			return err
@@ -106,36 +106,46 @@ func (p *WeixinPlugin) replyAgentOutput(ctx context.Context, job *inboundJob, ou
 	if job == nil {
 		return fmt.Errorf("nil job")
 	}
+	bot := job.Bot
+	if bot == nil {
+		return fmt.Errorf("nil job.bot")
+	}
 	tok := strings.TrimSpace(job.ContextToken)
 	if tok == "" {
-		tok = p.tokens.get(job.PeerID)
+		tok = bot.tokens.get(job.PeerID)
 	}
 	if tok == "" {
 		return fmt.Errorf("missing context_token for reply")
 	}
-	p.tokens.set(job.PeerID, tok)
-	return p.sendPlainTextChunks(ctx, job.PeerID, tok, output)
+	bot.tokens.set(job.PeerID, tok)
+	return bot.sendPlainTextChunks(ctx, job.PeerID, tok, output)
 }
 
-func (p *WeixinPlugin) sendTextToPeer(ctx context.Context, peerID, contextToken, text string, _ bool) error {
+func (b *weixinBot) sendTextToPeer(ctx context.Context, peerID, contextToken, text string, _ bool) error {
+	if b == nil {
+		return fmt.Errorf("nil bot")
+	}
 	tok := strings.TrimSpace(contextToken)
 	if tok == "" {
-		tok = p.tokens.get(peerID)
+		tok = b.tokens.get(peerID)
 	}
 	if tok == "" {
 		return fmt.Errorf("contextToken is required for weixin send")
 	}
-	return p.sendPlainTextChunks(ctx, peerID, tok, text)
+	return b.sendPlainTextChunks(ctx, peerID, tok, text)
 }
 
-func (p *WeixinPlugin) sendApprovalText(ctx context.Context, peerID, contextToken, body string) error {
+func (b *weixinBot) sendApprovalText(ctx context.Context, peerID, contextToken, body string) error {
+	if b == nil {
+		return fmt.Errorf("nil bot")
+	}
 	body = truncateRunes(body, 12000)
 	tok := strings.TrimSpace(contextToken)
 	if tok == "" {
-		tok = p.tokens.get(peerID)
+		tok = b.tokens.get(peerID)
 	}
 	if tok == "" {
 		return fmt.Errorf("missing context_token for approval message")
 	}
-	return p.sendPlainTextChunks(ctx, peerID, tok, body)
+	return b.sendPlainTextChunks(ctx, peerID, tok, body)
 }

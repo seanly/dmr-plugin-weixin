@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+func testWireBot(t *testing.T, p *WeixinPlugin, gw, tok string) *weixinBot {
+	t.Helper()
+	b := &weixinBot{
+		wp:               p,
+		gatewayBaseURL:   gw,
+		token:            tok,
+		channelVer:       "1.0.2",
+		accountID:        "acct",
+		tokens:           newContextTokenStore(),
+		lastSessionByPeer: map[string]string{},
+		typingByPeer:     map[string]string{},
+		recentMediaByPeer: map[string][]InboundAttachment{},
+	}
+	p.botsMu.Lock()
+	p.bots = []*weixinBot{b}
+	p.botsMu.Unlock()
+	return b
+}
+
 func TestPostJSONGetUpdates(t *testing.T) {
 	var sawPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,12 +48,11 @@ func TestPostJSONGetUpdates(t *testing.T) {
 	defer srv.Close()
 
 	p := NewWeixinPlugin()
-	p.cfg.GatewayBaseURL = srv.URL
-	p.cfg.Token = "tok"
+	b := testWireBot(t, p, srv.URL, "tok")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := p.getUpdates(ctx, "", 2*time.Second)
+	out, err := b.getUpdates(ctx, "", 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,11 +78,10 @@ func TestSendMessageAPI_BizError(t *testing.T) {
 	defer srv.Close()
 
 	p := NewWeixinPlugin()
-	p.cfg.GatewayBaseURL = srv.URL
-	p.cfg.Token = "tok"
+	b := testWireBot(t, p, srv.URL, "tok")
 
 	ctx := context.Background()
-	err := p.sendMessageAPI(ctx, &weixinMessage{
+	err := b.sendMessageAPI(ctx, &weixinMessage{
 		ToUserID:     "u@im.wechat",
 		ClientID:     "c1",
 		MessageType:  msgTypeBot,
@@ -113,17 +130,16 @@ func TestGetConfigAPI_OK(t *testing.T) {
 			t.Fatalf("path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ret":           0,
+			"ret":            0,
 			"typing_ticket": "dGlj",
 		})
 	}))
 	defer srv.Close()
 
 	p := NewWeixinPlugin()
-	p.cfg.GatewayBaseURL = srv.URL
-	p.cfg.Token = "tok"
+	b := testWireBot(t, p, srv.URL, "tok")
 
-	out, err := p.getConfigAPI(context.Background(), "u@im.wechat", "ctx")
+	out, err := b.getConfigAPI(context.Background(), "u@im.wechat", "ctx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,18 +154,17 @@ func TestGetConfigAPI_SessionNestedInData(t *testing.T) {
 			t.Fatalf("path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ret":           0,
+			"ret":            0,
 			"typing_ticket": "dGlj",
-			"data":          map[string]any{"session_id": "sess-in-data"},
+			"data":           map[string]any{"session_id": "sess-in-data"},
 		})
 	}))
 	defer srv.Close()
 
 	p := NewWeixinPlugin()
-	p.cfg.GatewayBaseURL = srv.URL
-	p.cfg.Token = "tok"
+	b := testWireBot(t, p, srv.URL, "tok")
 
-	out, err := p.getConfigAPI(context.Background(), "u@im.wechat", "ctx")
+	out, err := b.getConfigAPI(context.Background(), "u@im.wechat", "ctx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +176,7 @@ func TestGetConfigAPI_SessionNestedInData(t *testing.T) {
 func TestPrefetchOutboundSession_RemembersSessionForPeer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ret":           0,
+			"ret":            0,
 			"session_id":    "persist-me",
 			"typing_ticket": "dGlj",
 		})
@@ -169,21 +184,21 @@ func TestPrefetchOutboundSession_RemembersSessionForPeer(t *testing.T) {
 	defer srv.Close()
 
 	p := NewWeixinPlugin()
-	p.cfg.GatewayBaseURL = srv.URL
-	p.cfg.Token = "tok"
-	p.prefetchOutboundSession(context.Background(), "u@im.wechat", "ctx-1")
-	if got := p.sessionIDForPeer("u@im.wechat"); got != "persist-me" {
+	b := testWireBot(t, p, srv.URL, "tok")
+	b.prefetchOutboundSession(context.Background(), "u@im.wechat", "ctx-1")
+	if got := b.sessionIDForPeer("u@im.wechat"); got != "persist-me" {
 		t.Fatalf("session for peer: got %q", got)
 	}
 }
 
 func TestBuildBaseInfo_DefaultAndOverride(t *testing.T) {
 	p := NewWeixinPlugin()
-	if got := p.buildBaseInfo(); got.ChannelVersion != "1.0.2" {
+	b := testWireBot(t, p, "http://example", "tok")
+	if got := b.buildBaseInfo(); got.ChannelVersion != "1.0.2" {
 		t.Fatalf("default: got %q", got.ChannelVersion)
 	}
-	p.cfg.ChannelVersion = "  9.9.9  "
-	if got := p.buildBaseInfo(); got.ChannelVersion != "9.9.9" {
+	b.channelVer = "  9.9.9  "
+	if got := b.buildBaseInfo(); got.ChannelVersion != "9.9.9" {
 		t.Fatalf("override: got %q", got.ChannelVersion)
 	}
 }

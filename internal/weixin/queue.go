@@ -11,6 +11,7 @@ import (
 )
 
 type inboundJob struct {
+	Bot *weixinBot
 	QueueKey     string
 	TapeName     string
 	PeerID       string
@@ -96,10 +97,13 @@ func (p *WeixinPlugin) processJob(job *inboundJob) {
 	// Build context to pass to RunAgent - this replaces the active job mechanism
 	// Tools will receive this context via CallToolRequest.ContextJSON
 	jobCtx := map[string]any{
-		"peer_id":              job.PeerID,
-		"trigger_msg_id":       job.TriggerMsgID,
-		"context_token":        job.ContextToken,
-		"session_id":           job.SessionID,
+		"peer_id":        job.PeerID,
+		"trigger_msg_id": job.TriggerMsgID,
+		"context_token":  job.ContextToken,
+		"session_id":     job.SessionID,
+	}
+	if job.Bot != nil && strings.TrimSpace(job.Bot.tapeLabel) != "" {
+		jobCtx["weixin_bot"] = job.Bot.tapeLabel
 	}
 
 	resp, err := p.callRunAgentWithContext(job.TapeName, runPrompt, 0, jobCtx)

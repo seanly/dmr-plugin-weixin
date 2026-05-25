@@ -20,7 +20,8 @@ func main() {
 	api := flag.String("api", "", "ilink API root (empty = "+weixinlogin.DefaultAPIBaseURL+")")
 	botType := flag.String("bot-type", "", "ilink bot_type (empty = "+weixinlogin.DefaultBotType+")")
 	sk := flag.String("sk-route-tag", "", "optional SKRouteTag header")
-	out := flag.String("out", defaultOutPath(), "path to write credentials JSON (gateway_base_url, cdn_base_url, token)")
+	id := flag.String("id", "", "account label: default credentials path becomes ~/.dmr/var/lib/weixin/<id>/credentials.json ; also writes account_id in JSON (omit for ~/.dmr/var/lib/weixin/credentials.json)")
+	out := flag.String("out", "", "path to write credentials JSON (empty = standard path derived from --id)")
 	noTQ := flag.Bool("no-terminal-qr", false, "do not render QR as Unicode blocks on stdout")
 
 	flag.Usage = func() {
@@ -28,6 +29,12 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	safeID, err := weixinlogin.SanitizeLoginID(*id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(2)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -50,6 +57,9 @@ func main() {
 		"cdn_base_url":     strings.TrimSpace(res.CDNBaseURL),
 		"token":            strings.TrimSpace(res.Token),
 	}
+	if safeID != "" {
+		payload["account_id"] = safeID
+	}
 	b, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "encode json: %v\n", err)
@@ -57,7 +67,7 @@ func main() {
 	}
 	outPath := strings.TrimSpace(*out)
 	if outPath == "" {
-		outPath = defaultOutPath()
+		outPath = weixinlogin.DefaultCredentialsPath(safeID)
 	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir %q: %v\n", filepath.Dir(outPath), err)
@@ -68,12 +78,4 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, " wrote %s (ilink_bot_id=%s ilink_user_id=%s)\n", outPath, res.IlinkBotID, res.IlinkUserID)
-}
-
-func defaultOutPath() string {
-	h, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(h) == "" {
-		return filepath.Join(os.TempDir(), "weixin-credentials.json")
-	}
-	return filepath.Join(h, ".dmr", "var", "lib", "weixin", "credentials.json")
 }

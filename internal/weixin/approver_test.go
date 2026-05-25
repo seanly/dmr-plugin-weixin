@@ -21,3 +21,14 @@ func TestP2pPeerFromTape(t *testing.T) {
 		t.Fatalf("got %q %v", id, ok)
 	}
 }
+
+func TestParseWeixinP2PTape(t *testing.T) {
+	pid, lbl, ok := parseWeixinP2PTape("weixin:p2p:abc@im.wechat")
+	if !ok || lbl != "" || pid != "abc@im.wechat" {
+		t.Fatalf("legacy got peer=%q label=%q ok=%v", pid, lbl, ok)
+	}
+	pid2, lbl2, ok2 := parseWeixinP2PTape("weixin:work:p2p:xyz@im.wechat")
+	if !ok2 || lbl2 != "work" || pid2 != "xyz@im.wechat" {
+		t.Fatalf("scoped got peer=%q label=%q ok=%v", pid2, lbl2, ok2)
+	}
+}

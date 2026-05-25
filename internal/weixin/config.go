@@ -7,47 +7,61 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/seanly/dmr-plugin-weixin/internal/weixinlogin"
 )
 
-// WeixinConfig is loaded from the plugin InitRequest.ConfigJSON (DMR merges YAML into JSON).
-// gateway_base_url and token have no built-in defaults. cdn_base_url is optional until media/file send is enabled again.
+// WeixinBotConfig describes one bot / ilink credential set (YAML/TOML `[[plugins]] … [plugins.config]` / `bots` array).
+type WeixinBotConfig struct {
+	// ID is required when multiple bots are configured; it becomes `weixin:<id>:p2p:<peer>` tape segment.
+	ID string `json:"id"`
+
+	GatewayBaseURL   string   `json:"gateway_base_url"`
+	CDNBaseURL       string   `json:"cdn_base_url"`
+	Token            string   `json:"token"`
+	CredentialsPath  string   `json:"credentials_path"`
+	SKRouteTag       string   `json:"sk_route_tag"`
+	ChannelVersion   string   `json:"channel_version"`
+	AccountID        string   `json:"account_id"`
+	AllowFrom        []string `json:"allow_from"`
+}
+
+// WeixinConfig is loaded from the plugin InitRequest.ConfigJSON (DMR serializes plugin config from TOML into JSON).
+// Prefer `bots`; legacy single-bot flat keys are folded into bots[0] when `bots` is empty.
 type WeixinConfig struct {
 	ConfigBaseDir string `json:"config_base_dir"`
-	// Workspace is injected by DMR (resolved agent workspace); reserved for future tools (e.g. file send).
-	Workspace string `json:"workspace"`
-	// GatewayBaseURL is the ilink HTTP API root; paths like ilink/bot/getupdates are appended.
-	GatewayBaseURL string `json:"gateway_base_url"`
-	// CDNBaseURL reserved for future getuploadurl/CDN flows (optional while only text send is implemented).
-	CDNBaseURL string `json:"cdn_base_url"`
-	// Token is sent as Authorization: Bearer <token> (do not include the "Bearer " prefix in YAML).
-	Token string `json:"token"`
-	// CredentialsPath is optional JSON written by dmr-weixin-login; non-empty fields overlay gateway_base_url, cdn_base_url, token.
-	// V2 standard path: ~/.dmr/var/lib/weixin/credentials.json (relative to ~/.dmr: var/lib/weixin/credentials.json)
-	CredentialsPath string `json:"credentials_path"`
-	// SKRouteTag optional header SKRouteTag.
-	SKRouteTag string `json:"sk_route_tag"`
-	// ChannelVersion is sent as base_info.channel_version on every ilink request. Empty defaults to "1.0.2" (parity with @tencent-weixin/openclaw-weixin); some gateways vary behavior by this string.
-	ChannelVersion string `json:"channel_version"`
-	// AccountID isolates sync buf file and logs; default "default".
-	AccountID          string   `json:"account_id"`
-	AllowFrom          []string `json:"allow_from"`
-	ApprovalTimeoutSec int      `json:"approval_timeout_sec"`
-	DedupTTLMinutes    int      `json:"dedup_ttl_minutes"`
-	ExtraPrompt        string   `json:"extra_prompt"`
-	ExtraPromptFile    string   `json:"extra_prompt_file"`
+	Workspace     string `json:"workspace"`
+
+	Bots []WeixinBotConfig `json:"bots"`
+
+	// Legacy single-bot flat fields (used when bots is omitted).
+	GatewayBaseURL   string   `json:"gateway_base_url"`
+	CDNBaseURL       string   `json:"cdn_base_url"`
+	Token            string   `json:"token"`
+	CredentialsPath  string   `json:"credentials_path"`
+	SKRouteTag       string   `json:"sk_route_tag"`
+	ChannelVersion   string   `json:"channel_version"`
+	AccountID        string   `json:"account_id"`
+	AllowFrom        []string `json:"allow_from"`
+	ApprovalTimeoutSec int    `json:"approval_timeout_sec"`
+	DedupTTLMinutes    int    `json:"dedup_ttl_minutes"`
+	ExtraPrompt        string `json:"extra_prompt"`
+	ExtraPromptFile    string `json:"extra_prompt_file"`
 }
 
 func defaultWeixinConfig() WeixinConfig {
 	return WeixinConfig{
 		ApprovalTimeoutSec: 300,
 		DedupTTLMinutes:    10,
-		AccountID:          "default",
 	}
 }
 
 func parseWeixinConfig(jsonStr string) (WeixinConfig, error) {
 	cfg := defaultWeixinConfig()
 	if jsonStr == "" {
+		if err := finalizeWeixinConfig(&cfg); err != nil {
+			return cfg, err
+		}
 		return cfg, nil
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &cfg); err != nil {
@@ -59,19 +73,109 @@ func parseWeixinConfig(jsonStr string) (WeixinConfig, error) {
 	if cfg.DedupTTLMinutes <= 0 {
 		cfg.DedupTTLMinutes = 10
 	}
-	if strings.TrimSpace(cfg.AccountID) == "" {
-		cfg.AccountID = "default"
-	}
-	if err := mergeWeixinCredentials(&cfg); err != nil {
+	if err := finalizeWeixinConfig(&cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+func inheritLegacyIntoBot(dst *WeixinBotConfig, root *WeixinConfig) {
+	if strings.TrimSpace(dst.GatewayBaseURL) == "" {
+		dst.GatewayBaseURL = root.GatewayBaseURL
+	}
+	if strings.TrimSpace(dst.CDNBaseURL) == "" {
+		dst.CDNBaseURL = root.CDNBaseURL
+	}
+	if strings.TrimSpace(dst.Token) == "" {
+		dst.Token = root.Token
+	}
+	if strings.TrimSpace(dst.CredentialsPath) == "" {
+		dst.CredentialsPath = root.CredentialsPath
+	}
+	if strings.TrimSpace(dst.SKRouteTag) == "" {
+		dst.SKRouteTag = root.SKRouteTag
+	}
+	if strings.TrimSpace(dst.ChannelVersion) == "" {
+		dst.ChannelVersion = root.ChannelVersion
+	}
+	if strings.TrimSpace(dst.AccountID) == "" {
+		dst.AccountID = root.AccountID
+	}
+	if len(dst.AllowFrom) == 0 && len(root.AllowFrom) > 0 {
+		dst.AllowFrom = append([]string(nil), root.AllowFrom...)
+	}
+}
+
+func finalizeWeixinConfig(cfg *WeixinConfig) error {
+	if len(cfg.Bots) == 0 {
+		cfg.Bots = []WeixinBotConfig{{}}
+	}
+	for i := range cfg.Bots {
+		inheritLegacyIntoBot(&cfg.Bots[i], cfg)
+		if err := mergeWeixinCredentialsBot(&cfg.Bots[i], cfg.ConfigBaseDir); err != nil {
+			return fmt.Errorf("weixin bot #%d credentials: %w", i, err)
+		}
+		if raw := strings.TrimSpace(cfg.Bots[i].ID); raw != "" {
+			safe, err := weixinlogin.SanitizeLoginID(raw)
+			if err != nil {
+				return fmt.Errorf("weixin bot #%d id: %w", i, err)
+			}
+			cfg.Bots[i].ID = safe
+		}
+		if strings.TrimSpace(cfg.Bots[i].AccountID) == "" {
+			cfg.Bots[i].AccountID = "default"
+		}
+	}
+	if err := validateWeixinBots(cfg); err != nil {
+		return err
+	}
+
+	// Mirror first bot flat fields onto root so older code paths keep working.
+	b0 := cfg.Bots[0]
+	cfg.GatewayBaseURL = b0.GatewayBaseURL
+	cfg.CDNBaseURL = b0.CDNBaseURL
+	cfg.Token = b0.Token
+	cfg.CredentialsPath = b0.CredentialsPath
+	cfg.SKRouteTag = b0.SKRouteTag
+	cfg.ChannelVersion = b0.ChannelVersion
+	cfg.AccountID = b0.AccountID
+	cfg.AllowFrom = append([]string(nil), b0.AllowFrom...)
+	return nil
+}
+
+func validateWeixinBots(cfg *WeixinConfig) error {
+	if len(cfg.Bots) == 0 {
+		return fmt.Errorf("weixin: no bots configured")
+	}
+	if len(cfg.Bots) > 1 {
+		seen := make(map[string]struct{}, len(cfg.Bots))
+		for i := range cfg.Bots {
+			id := strings.TrimSpace(cfg.Bots[i].ID)
+			if id == "" {
+				return fmt.Errorf("weixin: bot #%d: id is required when multiple bots are configured", i)
+			}
+			if _, dup := seen[id]; dup {
+				return fmt.Errorf("weixin: duplicate bot id %q", id)
+			}
+			seen[id] = struct{}{}
+		}
+	}
+	for i := range cfg.Bots {
+		if strings.TrimSpace(cfg.Bots[i].GatewayBaseURL) == "" {
+			return fmt.Errorf("weixin: bot #%d: gateway_base_url is required", i)
+		}
+		if strings.TrimSpace(cfg.Bots[i].Token) == "" {
+			return fmt.Errorf("weixin: bot #%d: token is required", i)
+		}
+	}
+	return nil
 }
 
 type weixinCredentialsFile struct {
 	GatewayBaseURL string `json:"gateway_base_url"`
 	CDNBaseURL     string `json:"cdn_base_url"`
 	Token          string `json:"token"`
+	AccountID      string `json:"account_id"`
 }
 
 func expandHomePath(p string) string {
@@ -84,13 +188,13 @@ func expandHomePath(p string) string {
 	return p
 }
 
-func mergeWeixinCredentials(cfg *WeixinConfig) error {
-	p := strings.TrimSpace(cfg.CredentialsPath)
+func mergeWeixinCredentialsBot(bot *WeixinBotConfig, configBaseDir string) error {
+	p := strings.TrimSpace(bot.CredentialsPath)
 	if p == "" {
 		return nil
 	}
 	p = expandHomePath(p)
-	abs := resolveExtraPromptPath(p, cfg.ConfigBaseDir)
+	abs := resolveExtraPromptPath(p, configBaseDir)
 	b, err := os.ReadFile(abs)
 	if err != nil {
 		return fmt.Errorf("credentials_path %q: %w", p, err)
@@ -100,13 +204,16 @@ func mergeWeixinCredentials(cfg *WeixinConfig) error {
 		return fmt.Errorf("credentials_path %q: %w", p, err)
 	}
 	if s := strings.TrimSpace(f.GatewayBaseURL); s != "" {
-		cfg.GatewayBaseURL = s
+		bot.GatewayBaseURL = s
 	}
 	if s := strings.TrimSpace(f.CDNBaseURL); s != "" {
-		cfg.CDNBaseURL = s
+		bot.CDNBaseURL = s
 	}
 	if s := strings.TrimSpace(f.Token); s != "" {
-		cfg.Token = s
+		bot.Token = s
+	}
+	if s := strings.TrimSpace(f.AccountID); s != "" {
+		bot.AccountID = s
 	}
 	return nil
 }
